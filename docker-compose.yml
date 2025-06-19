@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: trainingpulse-postgres
+    environment:
+      POSTGRES_DB: trainingpulse
+      POSTGRES_USER: trainingpulse_user
+      POSTGRES_PASSWORD: trainingpulse_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - trainingpulse-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trainingpulse_user -d trainingpulse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: trainingpulse-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - trainingpulse-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trainingpulse-backend
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://trainingpulse_user:trainingpulse_pass@postgres:5432/trainingpulse
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-here-min-32-chars-dev
+      JWT_REFRESH_SECRET: your-super-secret-refresh-key-here-min-32-chars-dev
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      BCRYPT_ROUNDS: 12
+      CORS_ORIGIN: http://localhost:3000
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX_REQUESTS: 100
+      BULK_RATE_LIMIT_MAX_REQUESTS: 10
+      LOG_LEVEL: debug
+      ENABLE_REQUEST_LOGGING: true
+      FROM_EMAIL: noreply@trainingpulse.local
+      FROM_NAME: TrainingPulse Development
+      MAX_FILE_SIZE: 10485760
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    networks:
+      - trainingpulse-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: trainingpulse-frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001/api/v1
+      VITE_APP_NAME: TrainingPulse
+      VITE_APP_VERSION: 1.0.0
+      VITE_NODE_ENV: development
+      VITE_ENABLE_ANALYTICS: true
+      VITE_ENABLE_NOTIFICATIONS: true
+      VITE_ENABLE_BULK_OPERATIONS: true
+      VITE_WS_URL: ws://localhost:3001
+      VITE_MAX_FILE_SIZE: 10485760
+      VITE_ALLOWED_FILE_TYPES: pdf,doc,docx,xls,xlsx,ppt,pptx,jpg,jpeg,png,gif
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - trainingpulse-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  trainingpulse-network:
+    driver: bridge
