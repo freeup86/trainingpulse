@@ -72,17 +72,9 @@ class StatusAggregator {
         };
       }
 
-      // Use weighted calculation if weights are defined
-      let percentage;
-      let calculationMethod;
-      
-      if (stats.total_weight > 0) {
-        percentage = Math.round((Number(stats.completed_weight || 0) / Number(stats.total_weight)) * 100);
-        calculationMethod = 'weighted';
-      } else {
-        percentage = Math.round((Number(stats.completed_subtasks || 0) / Number(stats.total_subtasks || 1)) * 100);
-        calculationMethod = 'simple';
-      }
+      // Always use simple calculation based on subtask count (not weight)
+      const percentage = Math.round((Number(stats.completed_subtasks || 0) / Number(stats.total_subtasks || 1)) * 100);
+      const calculationMethod = 'simple';
 
       return {
         percentage: isNaN(percentage) ? 0 : Math.min(percentage, 100),

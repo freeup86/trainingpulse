@@ -16,7 +16,8 @@ import {
   ChevronDown,
   ChevronUp,
   ListTodo,
-  Edit
+  Edit,
+  ArrowRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { courses } from '../lib/api';
@@ -40,9 +41,33 @@ const WORKFLOW_STATES = {
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const TYPES = ['instructor_led', 'elearning', 'blended', 'microlearning', 'certification'];
 
+// Define workflow progression paths
+const WORKFLOW_PROGRESSION = {
+  'draft': ['planning'],
+  'planning': ['content_development'],
+  'content_development': ['review', 'sme_review'],
+  'review': ['instructional_review', 'sme_review'],
+  'sme_review': ['instructional_review', 'legal_review'],
+  'instructional_review': ['legal_review', 'final_approval'],
+  'legal_review': ['compliance_review', 'final_approval'],
+  'compliance_review': ['final_approval'],
+  'final_approval': ['published'],
+  'published': ['archived'],
+  'on_hold': ['draft', 'planning', 'content_development', 'review'], // Can return to various states
+  'archived': [] // Terminal state
+};
+
+// Helper function to calculate progress based on subtask completion
+const calculateProgress = (subtasks) => {
+  if (!subtasks || subtasks.length === 0) return 0;
+  const completedCount = subtasks.filter(st => st.status === 'completed').length;
+  return Math.round((completedCount / subtasks.length) * 100);
+};
+
 function CoursesPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedCourses, setExpandedCourses] = useState(new Set());
@@ -84,15 +109,13 @@ function CoursesPage() {
   }, [searchParams]);
 
   const { data: coursesData, isLoading, error } = useQuery({
-    queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { search: searchTerm, ...filters }],
+    queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { ...filters }],
     queryFn: () => {
       const params = {
-        search: searchTerm || undefined,
         priority: filters.priority || undefined,
         type: filters.type || undefined,
         status: filters.status || undefined,
         workflowState: filters.workflowState || undefined,
-        includeSubtasks: true, // Request subtasks for progress calculation
         limit: 50
       };
       
@@ -102,6 +125,31 @@ function CoursesPage() {
         : courses.getByUser(user.id, params);
     },
     enabled: !!user?.id
+  });
+
+  const workflowTransitionMutation = useMutation({
+    mutationFn: ({ courseId, newState, notes }) => 
+      courses.transitionWorkflow(courseId, newState, notes),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['courses']);
+      toast.success('Workflow state updated successfully');
+    },
+    onError: (error) => {
+      console.error('Workflow transition error:', error);
+      console.error('Error response data:', error.response?.data);
+      
+      // Extract error message safely
+      let errorMessage = 'Failed to update workflow state';
+      if (error.response?.data?.error?.message) {
+        errorMessage = error.response.data.error.message;
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (typeof error.response?.data?.error === 'string') {
+        errorMessage = error.response.data.error;
+      }
+      
+      toast.error(errorMessage);
+    }
   });
 
   const handleFilterChange = (key, value) => {
@@ -134,6 +182,14 @@ function CoursesPage() {
         newSet.add(courseId);
       }
       return newSet;
+    });
+  };
+
+  const handleWorkflowTransition = (courseId, newState) => {
+    workflowTransitionMutation.mutate({
+      courseId,
+      newState,
+      notes: `Transitioned to ${WORKFLOW_STATES[newState]?.label || newState}`
     });
   };
 
@@ -170,6 +226,15 @@ function CoursesPage() {
   // Handle different data structures from getAll() vs getByUser()
   let coursesList = coursesData?.data?.data?.courses || coursesData?.data?.courses || [];
   
+  // Apply client-side search filtering
+  if (searchTerm.trim()) {
+    const searchLower = searchTerm.toLowerCase();
+    coursesList = coursesList.filter(course => 
+      course.title?.toLowerCase().includes(searchLower) ||
+      course.description?.toLowerCase().includes(searchLower)
+    );
+  }
+  
   // Apply frontend filtering for special cases
   if (filters.overdue === 'true') {
     coursesList = coursesList.filter(course => {
@@ -184,7 +249,7 @@ function CoursesPage() {
     });
   }
   
-  const hasActiveFilters = Object.values(filters).some(v => v) || searchTerm;
+  const hasActiveFilters = Object.values(filters).some(v => v) || searchTerm.trim();
 
   return (
     <div className="p-6">
@@ -393,8 +458,9 @@ function CoursesPage() {
 
                         {/* Progress Bar */}
                         {(() => {
+                          // Use completion percentage from database 
+                          // This should be updated by the backend when subtasks change
                           const progressPercentage = course.completion_percentage || 0;
-                          
                           
                           return (
                             <div className="mt-2">
@@ -422,6 +488,37 @@ function CoursesPage() {
                           <div className="flex items-center">
                             <WorkflowIcon className={`h-4 w-4 mr-1 ${workflowInfo.color}`} />
                             <span>{workflowInfo.label}</span>
+                            {(() => {
+                              const currentState = course.workflowState || course.workflow_state || 'draft';
+                              const nextStates = WORKFLOW_PROGRESSION[currentState] || [];
+                              
+                              if (nextStates.length > 0 && (user?.role === 'admin' || user?.role === 'manager')) {
+                                return (
+                                  <div className="ml-2">
+                                    <select
+                                      value=""
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          handleWorkflowTransition(course.id, e.target.value);
+                                          e.target.value = ""; // Reset select
+                                        }
+                                      }}
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-xs px-1 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                      disabled={workflowTransitionMutation.isLoading}
+                                    >
+                                      <option value="">Advance →</option>
+                                      {nextStates.map(state => (
+                                        <option key={state} value={state}>
+                                          {WORKFLOW_STATES[state]?.label || state}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
 
                           {/* Due Date */}
@@ -481,7 +578,7 @@ function CoursesPage() {
   );
 }
 
-// Subtasks component
+// Subtasks component  
 function CourseSubtasks({ courseId }) {
   const queryClient = useQueryClient();
   const [editingTaskId, setEditingTaskId] = useState(null);
@@ -539,24 +636,44 @@ function CourseSubtasks({ courseId }) {
         delete newStatus[variables.subtaskId];
         return newStatus;
       });
-      toast.error(error.response?.data?.message || 'Failed to update subtask status');
+      console.error('Subtask update error:', error.response?.data);
+      toast.error(error.response?.data?.message || error.response?.data?.error || 'Failed to update subtask status');
     }
   });
 
   const handleStatusUpdate = (subtaskId, newStatus) => {
+    // Convert to string to handle numeric IDs
+    const subtaskIdStr = String(subtaskId);
+    
     // Don't update if it's a temporary ID (subtask without real ID)
-    if (subtaskId.startsWith('temp-')) {
+    if (subtaskIdStr.startsWith('temp-')) {
       toast.error('Cannot update subtask status: subtask not properly saved');
       setEditingTaskId(null);
       return;
     }
 
+    // Get the current task data to include required fields
+    const currentTask = subtasks.find(t => {
+      const taskId = t.id || t.subtask_id || t.subtaskId;
+      return String(taskId) === String(subtaskId);
+    });
+    
+    if (!currentTask) {
+      toast.error('Could not find subtask data');
+      return;
+    }
+
     // Don't close editing until the update is complete
     updateSubtaskMutation.mutate({
-      subtaskId,
-      updateData: { status: newStatus }
+      subtaskId: subtaskId, // Use original ID (might be number)
+      updateData: { 
+        title: currentTask.title, // Include required field
+        status: newStatus 
+      }
     });
   };
+
+  const subtasks = courseData?.data?.data?.subtasks || [];
 
   if (isLoading) {
     return (
@@ -567,8 +684,6 @@ function CourseSubtasks({ courseId }) {
       </div>
     );
   }
-
-  const subtasks = courseData?.data?.data?.subtasks || [];
 
   if (subtasks.length === 0) {
     return (

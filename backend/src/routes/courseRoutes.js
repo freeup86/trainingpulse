@@ -20,14 +20,7 @@ router.delete('/:id/subtasks/:subtaskId', authorizeResource('course'), courseCon
 router.get('/:id/status', authorizeResource('course'), courseController.getCourseStatus);
 router.post('/:id/recalculate-status', authorize(['admin', 'manager']), courseController.recalculateStatus);
 
-// Workflow transition (to be implemented later)
-router.post('/:id/transition', authorizeResource('course'), (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      message: 'Workflow transition endpoint - to be implemented in workflow service'
-    }
-  });
-});
+// Workflow transition
+router.post('/:id/transition', authorizeResource('course'), courseController.transitionWorkflow);
 
 module.exports = router;

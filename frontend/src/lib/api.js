@@ -122,6 +122,12 @@ export const courses = {
     
   deleteSubtask: (courseId, subtaskId) =>
     api.delete(`/courses/${courseId}/subtasks/${subtaskId}`),
+    
+  recalculateStatus: (courseId) =>
+    api.post(`/courses/${courseId}/recalculate-status`),
+    
+  transitionWorkflow: (courseId, newState, notes = '') =>
+    api.post(`/courses/${courseId}/transition`, { newState, notes }),
 };
 
 export const teams = {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '../hooks/useAuth';
 import { 
   ArrowLeft,
   Edit3,
@@ -44,10 +45,27 @@ const WORKFLOW_STATES = {
   'archived': { icon: Circle, label: 'Archived', color: 'text-gray-400' }
 };
 
+// Define workflow progression paths
+const WORKFLOW_PROGRESSION = {
+  'draft': ['planning'],
+  'planning': ['content_development'],
+  'content_development': ['review', 'sme_review'],
+  'review': ['instructional_review', 'sme_review'],
+  'sme_review': ['instructional_review', 'legal_review'],
+  'instructional_review': ['legal_review', 'final_approval'],
+  'legal_review': ['compliance_review', 'final_approval'],
+  'compliance_review': ['final_approval'],
+  'final_approval': ['published'],
+  'published': ['archived'],
+  'on_hold': ['draft', 'planning', 'content_development', 'review'], // Can return to various states
+  'archived': [] // Terminal state
+};
+
 export default function CourseDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isEditingTasks, setIsEditingTasks] = useState(false);
   const [showWorkflowMap, setShowWorkflowMap] = useState(false);
@@ -71,6 +89,33 @@ export default function CourseDetailPage() {
     }
   });
 
+  // Workflow transition mutation
+  const workflowTransitionMutation = useMutation({
+    mutationFn: ({ courseId, newState, notes }) => 
+      courses.transitionWorkflow(courseId, newState, notes),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['course', id]);
+      queryClient.invalidateQueries(['courses']);
+      toast.success('Workflow state updated successfully');
+    },
+    onError: (error) => {
+      console.error('Workflow transition error:', error);
+      console.error('Error response data:', error.response?.data);
+      
+      // Extract error message safely
+      let errorMessage = 'Failed to update workflow state';
+      if (error.response?.data?.error?.message) {
+        errorMessage = error.response.data.error.message;
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (typeof error.response?.data?.error === 'string') {
+        errorMessage = error.response.data.error;
+      }
+      
+      toast.error(errorMessage);
+    }
+  });
+
   const handleDeleteClick = () => {
     setShowDeleteDialog(true);
   };
@@ -82,6 +127,14 @@ export default function CourseDetailPage() {
 
   const handleDeleteCancel = () => {
     setShowDeleteDialog(false);
+  };
+
+  const handleWorkflowTransition = (newState) => {
+    workflowTransitionMutation.mutate({
+      courseId: id,
+      newState,
+      notes: `Transitioned to ${WORKFLOW_STATES[newState]?.label || newState}`
+    });
   };
 
   if (isLoading) {
@@ -401,6 +454,47 @@ export default function CourseDetailPage() {
                   📍 Click to view workflow map
                 </p>
               </div>
+
+              {/* Workflow Transition */}
+              {(() => {
+                const currentState = course.workflowState || course.workflow_state || 'draft';
+                const nextStates = WORKFLOW_PROGRESSION[currentState] || [];
+                
+                if (nextStates.length > 0 && (user?.role === 'admin' || user?.role === 'manager')) {
+                  return (
+                    <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">Advance Workflow</span>
+                      </div>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            handleWorkflowTransition(e.target.value);
+                            e.target.value = ""; // Reset select
+                          }
+                        }}
+                        className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={workflowTransitionMutation.isLoading}
+                      >
+                        <option value="">Choose next step →</option>
+                        {nextStates.map(state => (
+                          <option key={state} value={state}>
+                            {WORKFLOW_STATES[state]?.label || state}
+                          </option>
+                        ))}
+                      </select>
+                      {workflowTransitionMutation.isLoading && (
+                        <div className="flex items-center mt-2 text-sm text-blue-600 dark:text-blue-400">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                          Updating workflow...
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               {course.status && (
                 <div>
