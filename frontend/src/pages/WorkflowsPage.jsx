@@ -41,6 +41,8 @@ function WorkflowsPage() {
   const [selectedTab, setSelectedTab] = useState('templates');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState(null);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [templateToDuplicate, setTemplateToDuplicate] = useState(null);
 
   // Fetch workflow templates
   const { data: templatesData, isLoading: templatesLoading, error: templatesError, refetch } = useQuery({
@@ -147,15 +149,9 @@ function WorkflowsPage() {
           <div className="flex items-center space-x-3">
             <button 
               onClick={() => {
-                const selectedTemplate = templates?.[0]; // Get first template for demo
-                if (selectedTemplate) {
-                  navigate(`/workflows/create?duplicateFrom=${selectedTemplate.id}`);
-                } else {
-                  // Show a message if no templates exist to duplicate
-                  alert('No templates available to duplicate. Create a template first.');
-                }
+                setShowDuplicateModal(true);
               }}
-              disabled={!templates?.length}
+              disabled={!templates || templates.length === 0 || templatesLoading}
               className="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Copy className="h-4 w-4 mr-2" />
@@ -231,6 +227,67 @@ function WorkflowsPage() {
           <WorkflowDesigner />
         )}
       </div>
+
+      {/* Duplicate Template Modal */}
+      {showDuplicateModal && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 dark:bg-gray-900 dark:bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6 shadow-xl">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+              Select Template to Duplicate
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Choose a workflow template to use as the basis for your new template.
+            </p>
+            
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {templates && templates.length > 0 ? (
+                templates.map((template) => (
+                <button
+                  key={template.id}
+                  onClick={() => {
+                    navigate(`/workflows/create?duplicateFrom=${template.id}`);
+                    setShowDuplicateModal(false);
+                  }}
+                  className="w-full text-left p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors group"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                        {template.name}
+                      </h4>
+                      {template.description && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {template.description}
+                        </p>
+                      )}
+                      <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 mt-2 space-x-3">
+                        <span>{template.stageCount || template.states?.length || 0} stages</span>
+                        <span>Created {formatDate(template.createdAt || template.created_at)}</span>
+                      </div>
+                    </div>
+                    <ArrowRight className="h-5 w-5 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300" />
+                  </div>
+                </button>
+                ))
+              ) : (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <GitBranch className="h-8 w-8 mx-auto mb-2 text-gray-400 dark:text-gray-500" />
+                  <p>No templates available to duplicate</p>
+                </div>
+              )}
+            </div>
+            
+            <div className="mt-6 flex justify-end space-x-3">
+              <button
+                onClick={() => setShowDuplicateModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

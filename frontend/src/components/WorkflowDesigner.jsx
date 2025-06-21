@@ -85,7 +85,9 @@ const ROLES = [
   { value: 'sme', label: 'Subject Matter Expert' }
 ];
 
-function WorkflowDesigner({ templateId = null, initialTemplate = null }) {
+function WorkflowDesigner({ templateId = null, initialTemplate = null, showHeader = true }) {
+  console.log('WorkflowDesigner rendered with:', { templateId, initialTemplate, showHeader });
+  
   const [template, setTemplate] = useState(initialTemplate || {
     name: '',
     description: '',
@@ -97,6 +99,9 @@ function WorkflowDesigner({ templateId = null, initialTemplate = null }) {
   const [stages, setStages] = useState([]);
   const [transitions, setTransitions] = useState([]);
   const [selectedStage, setSelectedStage] = useState(null);
+  
+  console.log('Current stages state:', stages);
+  console.log('Current transitions state:', transitions);
   const [selectedTransition, setSelectedTransition] = useState(null);
   const [draggedStage, setDraggedStage] = useState(null);
   const [showStageModal, setShowStageModal] = useState(false);
@@ -108,8 +113,60 @@ function WorkflowDesigner({ templateId = null, initialTemplate = null }) {
 
   // Initialize with template data if provided
   useEffect(() => {
+    console.log('WorkflowDesigner useEffect triggered with initialTemplate:', initialTemplate);
+    
     if (initialTemplate) {
-      setStages(initialTemplate.states || []);
+      // Auto-position stages if they don't have position data
+      const positionedStages = (initialTemplate.states || []).map((stage, index) => {
+        let updatedStage = { ...stage };
+        
+        // Auto-position if no position data
+        if (stage.position_x === undefined || stage.position_x === null) {
+          // Arrange stages in a horizontal line with spacing
+          const spacing = 250;
+          const startX = 100;
+          const startY = 200;
+          
+          updatedStage.position_x = startX + (index * spacing);
+          updatedStage.position_y = startY;
+          
+          console.log(`Auto-positioned stage ${index}:`, {
+            name: stage.state_name,
+            x: updatedStage.position_x,
+            y: updatedStage.position_y
+          });
+        }
+        
+        // Ensure stage_type is set (infer from state_name if missing)
+        if (!updatedStage.stage_type) {
+          // Try to infer stage type from state_name
+          const stateNameLower = (updatedStage.state_name || '').toLowerCase();
+          if (stateNameLower.includes('planning')) {
+            updatedStage.stage_type = 'planning';
+          } else if (stateNameLower.includes('content') || stateNameLower.includes('development')) {
+            updatedStage.stage_type = 'content_development';
+          } else if (stateNameLower.includes('review')) {
+            updatedStage.stage_type = 'review';
+          } else if (stateNameLower.includes('approval')) {
+            updatedStage.stage_type = 'approval';
+          } else if (stateNameLower.includes('legal')) {
+            updatedStage.stage_type = 'legal_review';
+          } else if (stateNameLower.includes('published')) {
+            updatedStage.stage_type = 'published';
+          } else if (stateNameLower.includes('archived')) {
+            updatedStage.stage_type = 'archived';
+          } else {
+            updatedStage.stage_type = 'planning'; // Default
+          }
+          
+          console.log(`Inferred stage_type for ${stage.state_name}:`, updatedStage.stage_type);
+        }
+        
+        return updatedStage;
+      });
+      
+      console.log('Setting positioned stages:', positionedStages);
+      setStages(positionedStages);
       setTransitions(initialTemplate.transitions || []);
     }
   }, [initialTemplate]);
@@ -284,68 +341,82 @@ function WorkflowDesigner({ templateId = null, initialTemplate = null }) {
     }
   }, [template, stages, transitions, templateId, updateTemplateMutation, createTemplateMutation]);
 
+  console.log('About to render WorkflowDesigner, stages count:', stages.length);
+  
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="border-b border-gray-200 dark:border-gray-700 p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <GitBranch className="h-6 w-6 text-blue-500" />
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {templateId ? 'Edit Workflow Template' : 'Create Workflow Template'}
-              </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Design your workflow with drag-and-drop stages and conditional transitions
-              </p>
-            </div>
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-              <button
-                onClick={() => setMode('design')}
-                className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-                  mode === 'design'
-                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                Design
-              </button>
-              <button
-                onClick={() => setMode('preview')}
-                className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-                  mode === 'preview'
-                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                Preview
-              </button>
-              <button
-                onClick={() => setMode('settings')}
-                className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-                  mode === 'settings'
-                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                Settings
-              </button>
-            </div>
-            
-            <button
-              onClick={saveTemplate}
-              disabled={createTemplateMutation.isLoading || updateTemplateMutation.isLoading}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
-            >
-              <Save className="h-4 w-4 mr-2" />
-              {createTemplateMutation.isLoading || updateTemplateMutation.isLoading ? 'Saving...' : 'Save'}
-            </button>
-          </div>
+      {/* Debug info */}
+      <div className="p-4 bg-yellow-50 border-b">
+        <div className="text-sm">
+          <div>Template ID: {templateId}</div>
+          <div>Stages Count: {stages.length}</div>
+          <div>Mode: {mode}</div>
+          <div>Show Header: {showHeader ? 'Yes' : 'No'}</div>
         </div>
       </div>
+        
+        {/* Header */}
+        {showHeader && (
+          <div className="border-b border-gray-200 dark:border-gray-700 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <GitBranch className="h-6 w-6 text-blue-500" />
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {templateId ? 'Edit Workflow Template' : 'Create Workflow Template'}
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Design your workflow with drag-and-drop stages and conditional transitions
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-2">
+                <div className="flex bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                  <button
+                    onClick={() => setMode('design')}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      mode === 'design'
+                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    Design
+                  </button>
+                  <button
+                    onClick={() => setMode('preview')}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      mode === 'preview'
+                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    onClick={() => setMode('settings')}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      mode === 'settings'
+                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    Settings
+                  </button>
+                </div>
+                
+                <button
+                  onClick={saveTemplate}
+                  disabled={createTemplateMutation.isLoading || updateTemplateMutation.isLoading}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  {createTemplateMutation.isLoading || updateTemplateMutation.isLoading ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       <div className="flex-1 flex">
         {/* Sidebar */}
@@ -408,7 +479,62 @@ function WorkflowDesigner({ templateId = null, initialTemplate = null }) {
         )}
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col relative">
+          {/* Fixed Overlay Controls - Always visible in viewport */}
+          {mode === 'design' && (
+            <>
+              {/* Connection Mode Banner - Fixed to viewport */}
+              {connectionMode && (
+                <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg">
+                  <div className="flex items-center space-x-2">
+                    <Zap className="h-4 w-4" />
+                    <span className="text-sm font-medium">
+                      Connection Mode: {connectionStart ? 'Click target stage' : 'Click source stage'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setConnectionMode(false);
+                        setConnectionStart(null);
+                      }}
+                      className="ml-2 text-blue-200 hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fixed Toolbar - Always visible in viewport */}
+              <div className="fixed top-20 right-6 z-50 flex flex-col space-y-2">
+                <button
+                  onClick={() => setConnectionMode(!connectionMode)}
+                  className={`p-3 rounded-lg shadow-lg ${
+                    connectionMode 
+                      ? 'bg-blue-500 text-white' 
+                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                  } hover:bg-blue-600 hover:text-white transition-colors`}
+                  title="Connection Mode"
+                >
+                  <Zap className="h-5 w-5" />
+                </button>
+                
+                {/* Scroll to origin button */}
+                <button
+                  onClick={() => {
+                    const canvas = canvasRef.current?.parentElement;
+                    if (canvas) {
+                      canvas.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+                    }
+                  }}
+                  className="p-3 rounded-lg shadow-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  title="Scroll to Start"
+                >
+                  <Target className="h-5 w-5" />
+                </button>
+              </div>
+            </>
+          )}
+
           {mode === 'design' && (
             <DesignCanvas
               ref={canvasRef}
@@ -576,53 +702,27 @@ const DesignCanvas = React.forwardRef((props, ref) => {
   };
 
   return (
-    <div className="flex-1 relative overflow-hidden bg-gray-100 dark:bg-gray-900">
-      {/* Connection Mode Banner */}
-      {connectionMode && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg">
-          <div className="flex items-center space-x-2">
-            <Zap className="h-4 w-4" />
-            <span className="text-sm font-medium">
-              Connection Mode: {connectionStart ? 'Click target stage' : 'Click source stage'}
-            </span>
-            <button
-              onClick={() => {
-                setConnectionMode(false);
-                setConnectionStart(null);
-              }}
-              className="ml-2 text-blue-200 hover:text-white"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Toolbar */}
-      <div className="absolute top-4 right-4 z-10 flex space-x-2">
-        <button
-          onClick={() => setConnectionMode(!connectionMode)}
-          className={`p-2 rounded-lg shadow-lg ${
-            connectionMode 
-              ? 'bg-blue-500 text-white' 
-              : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-          } hover:bg-blue-600 hover:text-white transition-colors`}
-          title="Connection Mode"
-        >
-          <Zap className="h-4 w-4" />
-        </button>
-      </div>
-
+    <div className="flex-1 relative overflow-auto bg-gray-100 dark:bg-gray-900">
       {/* Canvas */}
       <div
         ref={ref}
-        className="w-full h-full relative cursor-crosshair"
+        className="relative cursor-crosshair bg-gray-100 dark:bg-gray-900"
+        style={{
+          width: Math.max(2000, ...(stages.length > 0 ? stages.map(s => (s.position_x || 0) + 300) : [2000])),
+          height: Math.max(1400, ...(stages.length > 0 ? stages.map(s => (s.position_y || 0) + 400) : [1400]))
+        }}
         onClick={onCanvasClick}
         onDrop={onCanvasDrop}
         onDragOver={onCanvasDragOver}
       >
         {/* Grid Background */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none">
+        <svg 
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            width: Math.max(2000, ...(stages.length > 0 ? stages.map(s => (s.position_x || 0) + 300) : [2000])),
+            height: Math.max(1400, ...(stages.length > 0 ? stages.map(s => (s.position_y || 0) + 400) : [1400]))
+          }}
+        >
           <defs>
             <pattern
               id="grid"
@@ -643,7 +743,13 @@ const DesignCanvas = React.forwardRef((props, ref) => {
         </svg>
 
         {/* Transitions */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none">
+        <svg 
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            width: Math.max(2000, ...(stages.length > 0 ? stages.map(s => (s.position_x || 0) + 300) : [2000])),
+            height: Math.max(1400, ...(stages.length > 0 ? stages.map(s => (s.position_y || 0) + 400) : [1400]))
+          }}
+        >
           {transitions.map(renderTransition)}
         </svg>
 
