@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { 
@@ -15,8 +15,10 @@ import {
   Pause,
   ChevronDown,
   ChevronUp,
-  ListTodo
+  ListTodo,
+  Edit
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { courses } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
 
@@ -481,11 +483,65 @@ function CoursesPage() {
 
 // Subtasks component
 function CourseSubtasks({ courseId }) {
+  const queryClient = useQueryClient();
+  const [editingTaskId, setEditingTaskId] = useState(null);
+
+  // Close editing when clicking outside or pressing Escape
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setEditingTaskId(null);
+      }
+    };
+
+    const handleClickOutside = (e) => {
+      if (editingTaskId && !e.target.closest('.subtask-status-select')) {
+        setEditingTaskId(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('click', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [editingTaskId]);
+  
   const { data: courseData, isLoading } = useQuery({
     queryKey: ['course', courseId],
     queryFn: () => courses.getById(courseId),
     staleTime: 5 * 60 * 1000 // 5 minutes
   });
+
+  const updateSubtaskMutation = useMutation({
+    mutationFn: ({ subtaskId, updateData }) => 
+      courses.updateSubtask(courseId, subtaskId, updateData),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['course', courseId]);
+      queryClient.invalidateQueries(['courses']);
+      setEditingTaskId(null);
+      toast.success('Subtask status updated successfully');
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Failed to update subtask status');
+    }
+  });
+
+  const handleStatusUpdate = (subtaskId, newStatus) => {
+    // Don't update if it's a temporary ID (subtask without real ID)
+    if (subtaskId.startsWith('temp-')) {
+      toast.error('Cannot update subtask status: subtask not properly saved');
+      setEditingTaskId(null);
+      return;
+    }
+
+    updateSubtaskMutation.mutate({
+      subtaskId,
+      updateData: { status: newStatus }
+    });
+  };
 
   if (isLoading) {
     return (
@@ -499,7 +555,6 @@ function CourseSubtasks({ courseId }) {
 
   const subtasks = courseData?.data?.data?.subtasks || [];
 
-
   if (subtasks.length === 0) {
     return (
       <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
@@ -511,6 +566,13 @@ function CourseSubtasks({ courseId }) {
     );
   }
 
+  const statusOptions = [
+    { value: 'pending', label: 'Pending', color: 'text-gray-500 dark:text-gray-400' },
+    { value: 'in_progress', label: 'In Progress', color: 'text-blue-500 dark:text-blue-400' },
+    { value: 'completed', label: 'Completed', color: 'text-green-500 dark:text-green-400' },
+    { value: 'on_hold', label: 'On Hold', color: 'text-yellow-500 dark:text-yellow-400' }
+  ];
+
   return (
     <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
       <div className="space-y-2">
@@ -519,13 +581,7 @@ function CourseSubtasks({ courseId }) {
           <span>Subtasks ({subtasks.length})</span>
         </div>
         {subtasks.map((task, index) => {
-          const statusColor = {
-            'pending': 'text-gray-500 dark:text-gray-400',
-            'in_progress': 'text-blue-500 dark:text-blue-400',
-            'completed': 'text-green-500 dark:text-green-400',
-            'on_hold': 'text-yellow-500 dark:text-yellow-400'
-          }[task.status] || 'text-gray-500 dark:text-gray-400';
-
+          const currentStatus = statusOptions.find(opt => opt.value === task.status) || statusOptions[0];
           const StatusIcon = {
             'pending': Circle,
             'in_progress': Clock,
@@ -533,16 +589,75 @@ function CourseSubtasks({ courseId }) {
             'on_hold': Pause
           }[task.status] || Circle;
 
+          const taskId = task.id || `temp-${index}`;
+          const isEditing = editingTaskId === taskId;
+          const isUpdating = updateSubtaskMutation.isLoading && updateSubtaskMutation.variables?.subtaskId === taskId;
+          const canEdit = !!task.id; // Only allow editing if subtask has a real ID
+
           return (
-            <div key={task.id || index} className="flex items-start space-x-3 ml-6">
-              <StatusIcon className={`h-4 w-4 mt-0.5 ${statusColor}`} />
+            <div key={task.id || index} className="group flex items-start space-x-3 ml-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
+              {isUpdating ? (
+                <div className="animate-spin rounded-full h-4 w-4 mt-0.5 border-b-2 border-blue-600"></div>
+              ) : (
+                <StatusIcon className={`h-4 w-4 mt-0.5 ${currentStatus.color}`} />
+              )}
               <div className="flex-1">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-900 dark:text-white">{task.title}</span>
-                  <span className={`text-xs ${statusColor}`}>
-                    {task.status.replace('_', ' ')}
-                  </span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm text-gray-900 dark:text-white">{task.title}</span>
+                    {isEditing ? (
+                      <select
+                        value={task.status}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleStatusUpdate(taskId, e.target.value);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="subtask-status-select text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        disabled={updateSubtaskMutation.isLoading}
+                        autoFocus
+                      >
+                        {statusOptions.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : canEdit ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingTaskId(taskId);
+                        }}
+                        className={`text-xs px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${currentStatus.color}`}
+                        title="Click to change status"
+                      >
+                        {currentStatus.label}
+                      </button>
+                    ) : (
+                      <span className={`text-xs px-2 py-1 ${currentStatus.color}`}>
+                        {currentStatus.label}
+                      </span>
+                    )}
+                  </div>
+                  {!isEditing && canEdit && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingTaskId(taskId);
+                      }}
+                      className="ml-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Edit status"
+                    >
+                      <Edit className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
+                {task.description && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {task.description}
+                  </p>
+                )}
               </div>
             </div>
           );
