@@ -576,9 +576,14 @@ function CourseSubtasks({ courseId }) {
   return (
     <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
       <div className="space-y-2">
-        <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          <ListTodo className="h-4 w-4 mr-2" />
-          <span>Subtasks ({subtasks.length})</span>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
+            <ListTodo className="h-4 w-4 mr-2" />
+            <span>Subtasks ({subtasks.length})</span>
+          </div>
+          <span className="text-xs text-gray-500 dark:text-gray-400 italic">
+            Click status to update
+          </span>
         </div>
         {subtasks.map((task, index) => {
           const currentStatus = statusOptions.find(opt => opt.value === task.status) || statusOptions[0];
@@ -613,7 +618,7 @@ function CourseSubtasks({ courseId }) {
                           handleStatusUpdate(taskId, e.target.value);
                         }}
                         onClick={(e) => e.stopPropagation()}
-                        className="subtask-status-select text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="subtask-status-select text-xs px-2 py-1 border border-solid border-blue-500 dark:border-blue-400 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                         disabled={updateSubtaskMutation.isLoading}
                         autoFocus
                       >
@@ -629,10 +634,13 @@ function CourseSubtasks({ courseId }) {
                           e.stopPropagation();
                           setEditingTaskId(taskId);
                         }}
-                        className={`text-xs px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors ${currentStatus.color}`}
+                        className={`text-xs px-2 py-1 rounded border border-dashed border-gray-300 dark:border-gray-600 hover:border-solid hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 transition-all cursor-pointer ${currentStatus.color} font-medium group inline-flex`}
                         title="Click to change status"
                       >
-                        {currentStatus.label}
+                        <span className="flex items-center space-x-1">
+                          <span>{currentStatus.label}</span>
+                          <ChevronDown className="h-3 w-3 opacity-50 group-hover:opacity-100 transition-opacity" />
+                        </span>
                       </button>
                     ) : (
                       <span className={`text-xs px-2 py-1 ${currentStatus.color}`}>
@@ -640,18 +648,6 @@ function CourseSubtasks({ courseId }) {
                       </span>
                     )}
                   </div>
-                  {!isEditing && canEdit && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingTaskId(taskId);
-                      }}
-                      className="ml-2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Edit status"
-                    >
-                      <Edit className="h-3 w-3" />
-                    </button>
-                  )}
                 </div>
                 {task.description && (
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
