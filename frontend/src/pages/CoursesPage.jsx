@@ -551,12 +551,7 @@ function CourseSubtasks({ courseId }) {
       return;
     }
 
-    // Set temporary status for immediate UI feedback
-    setTempStatus(prev => ({
-      ...prev,
-      [subtaskId]: newStatus
-    }));
-
+    // Don't close editing until the update is complete
     updateSubtaskMutation.mutate({
       subtaskId,
       updateData: { status: newStatus }
@@ -601,7 +596,8 @@ function CourseSubtasks({ courseId }) {
           <span>Subtasks ({subtasks.length})</span>
         </div>
         {subtasks.map((task, index) => {
-          const taskId = task.id || `temp-${index}`;
+          // Check for different possible ID field names
+          const taskId = task.id || task.subtask_id || task.subtaskId || `temp-${index}`;
           const currentTaskStatus = tempStatus[taskId] || task.status;
           const currentStatus = statusOptions.find(opt => opt.value === currentTaskStatus) || statusOptions[0];
           const StatusIcon = {
@@ -613,7 +609,7 @@ function CourseSubtasks({ courseId }) {
 
           const isEditing = editingTaskId === taskId;
           const isUpdating = updateSubtaskMutation.isLoading && updateSubtaskMutation.variables?.subtaskId === taskId;
-          const canEdit = !!task.id; // Only allow editing if subtask has a real ID
+          const canEdit = !!(task.id || task.subtask_id || task.subtaskId); // Only allow editing if subtask has a real ID
 
           return (
             <div key={task.id || index} className="group flex items-start space-x-3 ml-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -631,7 +627,14 @@ function CourseSubtasks({ courseId }) {
                         value={currentTaskStatus}
                         onChange={(e) => {
                           e.stopPropagation();
-                          handleStatusUpdate(taskId, e.target.value);
+                          const newStatus = e.target.value;
+                          // Update temp status immediately
+                          setTempStatus(prev => ({
+                            ...prev,
+                            [taskId]: newStatus
+                          }));
+                          // Then trigger the API update
+                          handleStatusUpdate(taskId, newStatus);
                         }}
                         onClick={(e) => e.stopPropagation()}
                         className="subtask-status-select text-xs px-2 py-1 border border-solid border-blue-500 dark:border-blue-400 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
