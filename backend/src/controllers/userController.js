@@ -1,6 +1,6 @@
 const Joi = require('joi');
 const bcrypt = require('bcrypt');
-const { query, transaction } = require('../config/database');
+const { query, transaction, getClient } = require('../config/database');
 const { asyncHandler, ValidationError, AuthorizationError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { get, set } = require('../config/redis');
@@ -139,6 +139,10 @@ class UserController {
    * GET /users/current - Get current user profile
    */
   getCurrentUser = asyncHandler(async (req, res) => {
+    if (!req.user) {
+      throw new ValidationError('User not authenticated');
+    }
+    
     const userId = req.user.id;
 
     // Try cache first
@@ -957,12 +961,10 @@ class UserController {
           c.completion_percentage,
           ca.role as assignment_role,
           ca.assigned_at,
-          wi.current_state_id,
-          ws.state_name as workflow_state
+          wi.current_state as workflow_state
         FROM courses c
         JOIN course_assignments ca ON c.id = ca.course_id
-        LEFT JOIN workflow_instances wi ON c.id = wi.course_id AND wi.status = 'active'
-        LEFT JOIN workflow_states ws ON wi.current_state_id = ws.id
+        LEFT JOIN workflow_instances wi ON c.id = wi.course_id AND wi.is_complete = false
         WHERE ca.user_id = $1 ${whereClause}
         ORDER BY c.due_date ASC NULLS LAST, c.priority DESC
         LIMIT ${limit} OFFSET ${offset}

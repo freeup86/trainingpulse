@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { 
   BookOpen, 
   Users, 
@@ -19,6 +19,7 @@ import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from
 
 export function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [dashboardData, setDashboardData] = useState({
     stats: {
@@ -37,9 +38,13 @@ export function DashboardPage() {
       try {
         setLoading(true);
 
-        // Fetch data in parallel
+        // Fetch data in parallel - admin gets all courses, others get user-specific courses
+        const coursesPromise = user.role === 'admin' 
+          ? courses.getAll({ limit: 10, sortBy: 'updated_at', sortOrder: 'desc' })
+          : courses.getByUser(user.id, { limit: 10, sortBy: 'updated_at', sortOrder: 'desc' });
+          
         const [coursesResponse, notificationsResponse, bottlenecksResponse] = await Promise.allSettled([
-          courses.getAll({ limit: 10, sortBy: 'updated_at', sortOrder: 'desc' }),
+          coursesPromise,
           notifications.getDigest({ maxAge: 24 }),
           analytics.getBottlenecks({ period: '7d', limit: 5 })
         ]);
@@ -48,19 +53,21 @@ export function DashboardPage() {
         const notificationsData = notificationsResponse.status === 'fulfilled' ? notificationsResponse.value.data.data : null;
         const bottlenecksData = bottlenecksResponse.status === 'fulfilled' ? bottlenecksResponse.value.data.data : null;
 
-        // Calculate statistics
+        // Calculate statistics from courses (all courses for admin, user courses for others)
+        // Handle different data structures from getAll() vs getByUser()
+        const coursesList = coursesData?.courses || coursesData?.data || [];
         const stats = {
-          totalCourses: coursesData?.totalCount || 0,
-          activeCourses: coursesData?.courses?.filter(c => ['in_progress', 'review'].includes(c.status)).length || 0,
-          completedCourses: coursesData?.courses?.filter(c => c.status === 'completed').length || 0,
-          overdueCourses: coursesData?.courses?.filter(c => {
-            return new Date(c.dueDate) < new Date() && !['completed', 'cancelled'].includes(c.status);
-          }).length || 0
+          totalCourses: coursesList.length,
+          activeCourses: coursesList.filter(c => ['in_progress', 'content_development', 'review', 'legal_review'].includes(c.status)).length,
+          completedCourses: coursesList.filter(c => c.status === 'completed').length,
+          overdueCourses: coursesList.filter(c => {
+            return new Date(c.due_date) < new Date() && !['completed', 'cancelled'].includes(c.status);
+          }).length
         };
 
         setDashboardData({
           stats,
-          recentCourses: coursesData?.courses || [],
+          recentCourses: coursesList,
           notifications: notificationsData?.urgent || [],
           bottlenecks: bottlenecksData?.bottlenecks || []
         });
@@ -75,24 +82,49 @@ export function DashboardPage() {
     fetchDashboardData();
   }, []);
 
-  const StatCard = ({ title, value, icon: Icon, color = 'blue', description }) => (
-    <Card>
+  const StatCard = ({ title, value, icon: Icon, color = 'blue', description, onClick }) => {
+    const cardContent = (
       <CardContent className="pt-6">
         <div className="flex items-center">
           <div className="flex-1">
-            <p className="text-sm font-medium text-gray-600">{title}</p>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{title}</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
             {description && (
-              <p className="text-xs text-gray-500 mt-1">{description}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{description}</p>
             )}
           </div>
-          <div className={`h-12 w-12 rounded-lg bg-${color}-100 flex items-center justify-center`}>
-            <Icon className={`h-6 w-6 text-${color}-600`} />
+          <div className={`h-12 w-12 rounded-lg flex items-center justify-center ${
+            color === 'blue' ? 'bg-blue-100 dark:bg-blue-900/20' :
+            color === 'yellow' ? 'bg-yellow-100 dark:bg-yellow-900/20' :
+            color === 'green' ? 'bg-green-100 dark:bg-green-900/20' :
+            color === 'red' ? 'bg-red-100 dark:bg-red-900/20' :
+            'bg-gray-100 dark:bg-gray-700/50'
+          }`}>
+            <Icon className={`h-6 w-6 ${
+              color === 'blue' ? 'text-blue-600 dark:text-blue-400' :
+              color === 'yellow' ? 'text-yellow-600 dark:text-yellow-400' :
+              color === 'green' ? 'text-green-600 dark:text-green-400' :
+              color === 'red' ? 'text-red-600 dark:text-red-400' :
+              'text-gray-600 dark:text-gray-400'
+            }`} />
           </div>
         </div>
       </CardContent>
-    </Card>
-  );
+    );
+
+    if (onClick) {
+      return (
+        <Card 
+          className="cursor-pointer hover:shadow-md transition-shadow duration-200"
+          onClick={onClick}
+        >
+          {cardContent}
+        </Card>
+      );
+    }
+
+    return <Card>{cardContent}</Card>;
+  };
 
   if (loading) {
     return (
@@ -119,23 +151,13 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Welcome back, {user.name}!
-          </h1>
-          <p className="text-gray-600 mt-1">
-            Here's what's happening with your training projects today.
-          </p>
-        </div>
-        {user.role !== 'viewer' && (
-          <Link to="/courses/new">
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Course
-            </Button>
-          </Link>
-        )}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          Welcome back, {user.name}!
+        </h1>
+        <p className="text-gray-600 dark:text-gray-400 mt-1">
+          Here's what's happening with your training projects today.
+        </p>
       </div>
 
       {/* Stats Grid */}
@@ -146,6 +168,7 @@ export function DashboardPage() {
           icon={BookOpen}
           color="blue"
           description="All courses assigned to you"
+          onClick={() => navigate('/courses')}
         />
         <StatCard
           title="Active Courses"
@@ -153,6 +176,7 @@ export function DashboardPage() {
           icon={Clock}
           color="yellow"
           description="Currently in progress"
+          onClick={() => navigate('/courses?filter=active')}
         />
         <StatCard
           title="Completed"
@@ -160,6 +184,7 @@ export function DashboardPage() {
           icon={CheckCircle}
           color="green"
           description="Successfully finished"
+          onClick={() => navigate('/courses?status=completed')}
         />
         <StatCard
           title="Overdue"
@@ -167,6 +192,7 @@ export function DashboardPage() {
           icon={AlertTriangle}
           color="red"
           description="Past due date"
+          onClick={() => navigate('/courses?filter=overdue')}
         />
       </div>
 
@@ -182,8 +208,8 @@ export function DashboardPage() {
           <CardContent>
             {dashboardData.recentCourses.length === 0 ? (
               <div className="text-center py-6">
-                <BookOpen className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500">No recent courses found</p>
+                <BookOpen className="h-12 w-12 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
+                <p className="text-gray-500 dark:text-gray-400">No recent courses found</p>
                 <Button variant="outline" className="mt-2" asChild>
                   <Link to="/courses">View All Courses</Link>
                 </Button>
@@ -195,7 +221,7 @@ export function DashboardPage() {
                     <div className="flex-1 min-w-0">
                       <Link 
                         to={`/courses/${course.id}`}
-                        className="text-sm font-medium text-gray-900 hover:text-blue-600"
+                        className="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400"
                       >
                         {course.title}
                       </Link>
@@ -203,13 +229,13 @@ export function DashboardPage() {
                         <Badge className={getStatusColor(course.status)}>
                           {course.status}
                         </Badge>
-                        <Badge variant="outline" className={getPriorityColor(course.priority)}>
+                        <Badge className={getPriorityColor(course.priority)}>
                           {course.priority}
                         </Badge>
                       </div>
                     </div>
-                    <div className="text-sm text-gray-500">
-                      {formatRelativeTime(course.updatedAt)}
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {formatRelativeTime(course.updated_at)}
                     </div>
                   </div>
                 ))}
@@ -234,9 +260,9 @@ export function DashboardPage() {
           <CardContent>
             {dashboardData.notifications.length === 0 ? (
               <div className="text-center py-6">
-                <CheckCircle className="h-12 w-12 text-green-400 mx-auto mb-4" />
-                <p className="text-gray-500">All caught up!</p>
-                <p className="text-sm text-gray-400">No urgent notifications</p>
+                <CheckCircle className="h-12 w-12 text-green-400 dark:text-green-500 mx-auto mb-4" />
+                <p className="text-gray-500 dark:text-gray-400">All caught up!</p>
+                <p className="text-sm text-gray-400 dark:text-gray-500">No urgent notifications</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -246,13 +272,13 @@ export function DashboardPage() {
                       <div className="h-2 w-2 bg-red-500 rounded-full mt-2"></div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900">
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                         {notification.title}
                       </p>
-                      <p className="text-sm text-gray-500 mt-1">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                         {notification.message}
                       </p>
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                         {formatRelativeTime(notification.createdAt)}
                       </p>
                     </div>

@@ -86,8 +86,8 @@ export const courses = {
   getById: (id) =>
     api.get(`/courses/${id}`),
   
-  getByUser: (userId) =>
-    api.get(`/users/${userId}/courses`),
+  getByUser: (userId, params = {}) =>
+    api.get(`/users/${userId}/courses`, { params }),
   
   create: (courseData) =>
     api.post('/courses', courseData),
@@ -112,6 +112,16 @@ export const courses = {
   
   addDependency: (id, dependency) =>
     api.post(`/courses/${id}/dependencies`, dependency),
+  
+  // Subtask operations
+  createSubtask: (courseId, subtaskData) =>
+    api.post(`/courses/${courseId}/subtasks`, subtaskData),
+    
+  updateSubtask: (courseId, subtaskId, updateData) =>
+    api.put(`/courses/${courseId}/subtasks/${subtaskId}`, updateData),
+    
+  deleteSubtask: (courseId, subtaskId) =>
+    api.delete(`/courses/${courseId}/subtasks/${subtaskId}`),
 };
 
 export const teams = {
@@ -127,15 +137,10 @@ export const teams = {
   update: (id, updates) =>
     api.put(`/teams/${id}`, updates),
   
-  addMember: (id, member) =>
-    api.post(`/teams/${id}/members`, member),
-  
-  removeMember: (id, userId) =>
-    api.delete(`/teams/${id}/members/${userId}`),
-  
-  getPerformance: (id, period = '30d') =>
-    api.get(`/teams/${id}/performance`, { params: { period } }),
+  delete: (id) =>
+    api.delete(`/teams/${id}`),
 };
+
 
 export const users = {
   getAll: (params = {}) =>
@@ -185,6 +190,9 @@ export const analytics = {
   getWorkloadAnalysis: (params = {}) =>
     api.get('/analytics/workload-analysis', { params }),
   
+  getPerformance: (params = {}) =>
+    api.get('/analytics/performance', { params }),
+  
   getImpactAnalysis: (courseId, params = {}) =>
     api.get(`/analytics/impact/${courseId}`, { params }),
   
@@ -205,8 +213,32 @@ export const workflows = {
   getById: (id) =>
     api.get(`/workflows/templates/${id}`),
   
+  getActivity: (id, params = {}) =>
+    api.get(`/workflows/templates/${id}/activity`, { params }),
+  
   createTemplate: (template) =>
     api.post('/workflows/templates', template),
+  
+  updateTemplate: (id, template) =>
+    api.put(`/workflows/templates/${id}`, template),
+  
+  deleteTemplate: (id) =>
+    api.delete(`/workflows/templates/${id}`),
+  
+  addStage: (templateId, stage) =>
+    api.post(`/workflows/templates/${templateId}/stages`, stage),
+  
+  updateStage: (templateId, stageId, updates) =>
+    api.put(`/workflows/templates/${templateId}/stages/${stageId}`, updates),
+  
+  deleteStage: (templateId, stageId) =>
+    api.delete(`/workflows/templates/${templateId}/stages/${stageId}`),
+  
+  addTransition: (templateId, transition) =>
+    api.post(`/workflows/templates/${templateId}/transitions`, transition),
+  
+  deleteTransition: (templateId, transitionId) =>
+    api.delete(`/workflows/templates/${templateId}/transitions/${transitionId}`),
   
   getInstance: (courseId) =>
     api.get(`/workflows/instances/${courseId}`),

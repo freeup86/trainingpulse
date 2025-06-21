@@ -44,3 +44,149 @@
     }
   }
 }
+
+/* Compact Mode Styles */
+.compact-mode {
+  /* Reduce overall padding and margins */
+  --compact-spacing: 0.75;
+}
+
+/* Padding reductions */
+.compact-mode .p-6 {
+  padding: 1rem !important; /* p-4 equivalent */
+}
+
+.compact-mode .p-4 {
+  padding: 0.75rem !important; /* p-3 equivalent */
+}
+
+.compact-mode .py-4 {
+  padding-top: 0.75rem !important;
+  padding-bottom: 0.75rem !important; /* py-3 equivalent */
+}
+
+.compact-mode .py-3 {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important; /* py-2 equivalent */
+}
+
+.compact-mode .px-4 {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important; /* px-3 equivalent */
+}
+
+.compact-mode .px-3 {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important; /* px-2 equivalent */
+}
+
+/* Margin reductions */
+.compact-mode .mb-6 {
+  margin-bottom: 1rem !important; /* mb-4 equivalent */
+}
+
+.compact-mode .mb-4 {
+  margin-bottom: 0.75rem !important; /* mb-3 equivalent */
+}
+
+.compact-mode .mt-6 {
+  margin-top: 1rem !important; /* mt-4 equivalent */
+}
+
+.compact-mode .mt-4 {
+  margin-top: 0.75rem !important; /* mt-3 equivalent */
+}
+
+/* Space reductions */
+.compact-mode .space-y-6 > * + * {
+  margin-top: 1rem !important;
+}
+
+.compact-mode .space-y-4 > * + * {
+  margin-top: 0.75rem !important;
+}
+
+.compact-mode .space-y-3 > * + * {
+  margin-top: 0.5rem !important;
+}
+
+/* Gap reductions */
+.compact-mode .gap-6 {
+  gap: 1rem !important;
+}
+
+.compact-mode .gap-4 {
+  gap: 0.75rem !important;
+}
+
+/* Height reductions */
+.compact-mode .h-12 {
+  height: 2.5rem !important; /* h-10 equivalent */
+}
+
+.compact-mode .h-10 {
+  height: 2rem !important; /* h-8 equivalent */
+}
+
+/* Text size reductions */
+.compact-mode .text-2xl {
+  font-size: 1.25rem !important;
+  line-height: 1.75rem !important; /* text-xl equivalent */
+}
+
+.compact-mode .text-xl {
+  font-size: 1.125rem !important;
+  line-height: 1.75rem !important; /* text-lg equivalent */
+}
+
+.compact-mode .text-lg {
+  font-size: 1rem !important;
+  line-height: 1.5rem !important; /* text-base equivalent */
+}
+
+/* Button padding reductions */
+.compact-mode button.px-4 {
+  padding-left: 0.75rem !important;
+  padding-right: 0.75rem !important;
+}
+
+.compact-mode button.py-2 {
+  padding-top: 0.375rem !important;
+  padding-bottom: 0.375rem !important;
+}
+
+/* Form input padding reductions */
+.compact-mode input.px-3 {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+
+.compact-mode input.py-2 {
+  padding-top: 0.375rem !important;
+  padding-bottom: 0.375rem !important;
+}
+
+.compact-mode select.px-3 {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+
+.compact-mode select.py-2 {
+  padding-top: 0.375rem !important;
+  padding-bottom: 0.375rem !important;
+}
+
+/* Table row height reductions */
+.compact-mode .divide-y > * {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+/* Card padding reductions */
+.compact-mode .rounded-lg.p-4 {
+  padding: 0.75rem !important;
+}
+
+.compact-mode .rounded-lg.p-6 {
+  padding: 1rem !important;
+}

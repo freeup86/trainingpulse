@@ -13,6 +13,9 @@ router.get('/workload', authorize(['admin', 'manager']), analyticsController.get
 // Workload analysis (alias for frontend compatibility)
 router.get('/workload-analysis', authorize(['admin', 'manager']), analyticsController.getWorkload);
 
+// Performance metrics
+router.get('/performance', authorize(['admin', 'manager', 'designer']), analyticsController.getPerformance);
+
 // Impact analysis
 router.get('/impact/:courseId', authorizeResource('course'), analyticsController.getImpactAnalysis);
 

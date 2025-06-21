@@ -7,24 +7,18 @@ const logger = require('../utils/logger');
 // Validation schemas
 const workflowTemplateSchema = Joi.object({
   name: Joi.string().min(3).max(100).required(),
-  description: Joi.string().max(500).optional(),
-  courseType: Joi.string().valid('standard', 'compliance', 'certification').required(),
-  stages: Joi.array().items(
+  description: Joi.string().max(500).optional().allow(null),
+  is_active: Joi.boolean().default(true),
+  states: Joi.array().items(
     Joi.object({
-      name: Joi.string().min(2).max(100).required(),
-      description: Joi.string().max(500).optional(),
-      order: Joi.number().integer().min(1).required(),
-      estimatedDays: Joi.number().integer().min(1).max(365).optional(),
-      requiredRole: Joi.string().valid('designer', 'reviewer', 'manager').optional(),
-      isParallel: Joi.boolean().default(false),
-      autoAdvance: Joi.boolean().default(false),
-      conditions: Joi.object({
-        requiresApproval: Joi.boolean().default(false),
-        minimumReviewers: Joi.number().integer().min(1).max(10).default(1),
-        allowSelfApproval: Joi.boolean().default(false)
-      }).optional()
+      state_name: Joi.string().min(2).max(100).required(),
+      display_name: Joi.string().min(2).max(100).required(),
+      is_initial: Joi.boolean().default(false),
+      is_final: Joi.boolean().default(false),
+      state_config: Joi.string().optional()
     })
-  ).min(1).max(20).required()
+  ).min(1).max(20).required(),
+  transitions: Joi.array().optional()
 });
 
 const updateInstanceSchema = Joi.object({
@@ -45,12 +39,12 @@ class WorkflowController {
    * GET /workflows/templates - Get workflow templates
    */
   getWorkflowTemplates = asyncHandler(async (req, res) => {
-    const { courseType = null, active = true } = req.query;
+    const { active = true } = req.query;
 
     let templatesQuery = `
       SELECT 
         wt.*,
-        (SELECT COUNT(*) FROM workflow_instances WHERE template_id = wt.id) as usage_count
+        (SELECT COUNT(*) FROM workflow_instances WHERE workflow_template_id = wt.id) as usage_count
       FROM workflow_templates wt
       WHERE 1=1
     `;
@@ -59,39 +53,38 @@ class WorkflowController {
     let paramCount = 0;
 
     if (active !== 'all') {
-      templatesQuery += ` AND wt.active = $${++paramCount}`;
+      templatesQuery += ` AND wt.is_active = $${++paramCount}`;
       params.push(active === 'true' || active === true);
     }
 
-    if (courseType) {
-      templatesQuery += ` AND wt.course_type = $${++paramCount}`;
-      params.push(courseType);
-    }
-
-    templatesQuery += ` ORDER BY wt.course_type, wt.name`;
+    templatesQuery += ` ORDER BY wt.name`;
 
     const templatesResult = await query(templatesQuery, params);
 
-    // Get stages for each template
+    // Get states for each template
     for (const template of templatesResult.rows) {
-      const stagesResult = await query(`
-        SELECT * FROM workflow_stages 
-        WHERE template_id = $1 
-        ORDER BY stage_order
+      const statesResult = await query(`
+        SELECT * FROM workflow_states 
+        WHERE workflow_template_id = $1 
+        ORDER BY id
       `, [template.id]);
 
-      template.stages = stagesResult.rows.map(stage => ({
-        id: stage.id,
-        name: stage.name,
-        description: stage.description,
-        order: stage.stage_order,
-        estimatedDays: stage.estimated_days,
-        requiredRole: stage.required_role,
-        isParallel: stage.is_parallel,
-        autoAdvance: stage.auto_advance,
-        conditions: stage.conditions || {}
+      template.states = statesResult.rows.map(state => ({
+        id: state.id,
+        state_name: state.state_name,
+        display_name: state.display_name,
+        is_initial: state.is_initial,
+        is_final: state.is_final,
+        state_config: state.state_config ? JSON.parse(state.state_config) : {}
       }));
     }
+
+    // Set cache control headers to prevent 304 responses
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
 
     res.json({
       success: true,
@@ -99,10 +92,9 @@ class WorkflowController {
         id: template.id,
         name: template.name,
         description: template.description,
-        courseType: template.course_type,
-        stages: template.stages,
+        is_active: template.is_active,
+        states: template.states,
         usageCount: parseInt(template.usage_count),
-        active: template.active,
         createdAt: template.created_at,
         updatedAt: template.updated_at
       }))
@@ -118,35 +110,47 @@ class WorkflowController {
       throw new AuthorizationError('Only admins and managers can create workflow templates');
     }
 
+    const { name, description, is_active, stages, states } = req.body;
+    const stageList = stages || states || [];
+
+    // Create validation schema
+    const createSchema = Joi.object({
+      name: Joi.string().min(3).max(100).required(),
+      description: Joi.string().max(500).optional().allow(null),
+      is_active: Joi.boolean().default(true),
+      stages: Joi.array().optional(),
+      states: Joi.array().optional()
+    });
+
     // Validate input
-    const { error, value } = workflowTemplateSchema.validate(req.body);
+    const { error, value } = createSchema.validate(req.body);
     if (error) {
       throw new ValidationError('Invalid workflow template data', error.details);
     }
 
-    const { name, description, courseType, stages } = value;
-
     const template = await transaction(async (client) => {
       // Create template
       const templateResult = await client.query(`
-        INSERT INTO workflow_templates (name, description, course_type, created_at, updated_at)
+        INSERT INTO workflow_templates (name, description, is_active, created_at, updated_at)
         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
-      `, [name, description, courseType]);
+      `, [name, description || null, is_active !== false]);
 
       const newTemplate = templateResult.rows[0];
 
-      // Create stages
-      for (const stage of stages) {
+      // Create states
+      for (const state of stageList) {
         await client.query(`
-          INSERT INTO workflow_stages (
-            template_id, name, description, stage_order, estimated_days,
-            required_role, is_parallel, auto_advance, conditions, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+          INSERT INTO workflow_states (
+            workflow_template_id, state_name, display_name, is_initial, is_final, state_config, created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
         `, [
-          newTemplate.id, stage.name, stage.description, stage.order,
-          stage.estimatedDays, stage.requiredRole, stage.isParallel,
-          stage.autoAdvance, JSON.stringify(stage.conditions || {})
+          newTemplate.id, 
+          state.state_name, 
+          state.display_name,
+          state.is_initial || false,
+          state.is_final || false,
+          state.state_config || null
         ]);
       }
 
@@ -156,8 +160,7 @@ class WorkflowController {
     logger.info('Workflow template created', {
       templateId: template.id,
       name: template.name,
-      courseType: template.course_type,
-      stageCount: stages.length,
+      stateCount: stageList.length,
       createdBy: req.user.id
     });
 
@@ -167,8 +170,7 @@ class WorkflowController {
         id: template.id,
         name: template.name,
         description: template.description,
-        courseType: template.course_type,
-        stageCount: stages.length,
+        stateCount: stageList.length,
         createdAt: template.created_at
       },
       message: 'Workflow template created successfully'
@@ -689,118 +691,501 @@ class WorkflowController {
    */
   getWorkflowTemplateById = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const client = await getClient();
 
-    try {
-      const result = await client.query(`
-        SELECT 
-          wt.id,
-          wt.name,
-          wt.description,
-          wt.is_active,
-          wt.created_at,
-          wt.updated_at,
-          COUNT(ws.id) as stage_count,
-          (
-            SELECT COUNT(*) FROM workflow_instances wi 
-            WHERE wi.workflow_template_id = wt.id
-          ) as usage_count,
-          (
-            SELECT COUNT(*) * 100.0 / NULLIF(COUNT(*), 0)
-            FROM workflow_instances wi 
-            WHERE wi.workflow_template_id = wt.id 
-              AND wi.status = 'completed'
-          ) as completion_rate
-        FROM workflow_templates wt
-        LEFT JOIN workflow_states ws ON ws.workflow_template_id = wt.id
-        WHERE wt.id = $1
-        GROUP BY wt.id
-      `, [id]);
+    // First check if the template exists
+    const templateResult = await query(`
+      SELECT 
+        id,
+        name,
+        description,
+        is_active,
+        created_at,
+        updated_at
+      FROM workflow_templates 
+      WHERE id = $1
+    `, [id]);
 
-      if (result.rows.length === 0) {
-        throw new NotFoundError('Workflow template not found');
-      }
-
-      const template = result.rows[0];
-
-      // Get workflow stages
-      const stagesResult = await client.query(
-        `SELECT 
-          id,
-          state_name,
-          display_name,
-          is_initial,
-          is_final,
-          state_config
-        FROM workflow_states 
-        WHERE workflow_template_id = $1 
-        ORDER BY id`,
-        [id]
-      );
-
-      template.stages = stagesResult.rows.map((stage, index) => ({
-        ...stage,
-        order: index + 1,
-        name: stage.display_name,
-        description: stage.state_config?.description || ''
-      }));
-
-      res.json({
-        success: true,
-        data: template
+    if (templateResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Workflow template not found'
+        }
       });
-    } finally {
-      client.release();
     }
+
+    const template = templateResult.rows[0];
+
+    // Get workflow states
+    const statesResult = await query(`
+      SELECT 
+        id,
+        state_name,
+        display_name,
+        is_initial,
+        is_final,
+        state_config
+      FROM workflow_states 
+      WHERE workflow_template_id = $1 
+      ORDER BY id
+    `, [id]);
+
+    // Get usage count and completion rate
+    const usageResult = await query(
+      'SELECT COUNT(*) as usage_count FROM workflow_instances WHERE workflow_template_id = $1',
+      [id]
+    );
+
+    const completedResult = await query(`
+      SELECT COUNT(*) as completed_count 
+      FROM workflow_instances 
+      WHERE workflow_template_id = $1 AND is_complete = true
+    `, [id]);
+
+    const usageCount = parseInt(usageResult.rows[0].usage_count) || 0;
+    const completedCount = parseInt(completedResult.rows[0].completed_count) || 0;
+    const completionRate = usageCount > 0 ? Math.round((completedCount / usageCount) * 100) : 0;
+
+    // Set cache control headers to prevent 304 responses
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        is_active: template.is_active,
+        createdAt: template.created_at,
+        updatedAt: template.updated_at,
+        usageCount: usageCount,
+        completionRate: completionRate,
+        states: statesResult.rows.map(state => ({
+          id: state.id,
+          state_name: state.state_name,
+          display_name: state.display_name,
+          is_initial: state.is_initial,
+          is_final: state.is_final,
+          state_config: typeof state.state_config === 'string' ? state.state_config : JSON.stringify(state.state_config || {
+            color: '#3B82F6',
+            icon: 'Clock'
+          })
+        }))
+      }
+    });
+  });
+
+  /**
+   * GET /workflows/templates/:id/activity - Get recent activity for a workflow template
+   */
+  getWorkflowTemplateActivity = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { limit = 20 } = req.query;
+
+    // Get recent workflow transitions for this template
+    const transitionsResult = await query(`
+      SELECT 
+        wt.id,
+        wt.from_state,
+        wt.to_state,
+        wt.notes,
+        wt.created_at,
+        c.title as course_title,
+        c.id as course_id,
+        u.name as user_name,
+        u.email as user_email,
+        'transition' as activity_type
+      FROM workflow_transitions wt
+      JOIN workflow_instances wi ON wt.workflow_instance_id = wi.id
+      JOIN courses c ON wi.course_id = c.id
+      JOIN users u ON wt.triggered_by = u.id
+      WHERE wi.workflow_template_id = $1
+      ORDER BY wt.created_at DESC
+      LIMIT $2
+    `, [id, Math.min(parseInt(limit), 50)]);
+
+    // Get recent course assignments for courses using this template
+    const assignmentsResult = await query(`
+      SELECT 
+        ca.assigned_at as created_at,
+        c.title as course_title,
+        c.id as course_id,
+        u.name as user_name,
+        u.email as user_email,
+        assigned_u.name as assigned_user_name,
+        ca.role as assignment_role,
+        'assignment' as activity_type
+      FROM course_assignments ca
+      JOIN courses c ON ca.course_id = c.id
+      JOIN workflow_instances wi ON wi.course_id = c.id
+      JOIN users u ON ca.assigned_by = u.id
+      JOIN users assigned_u ON ca.user_id = assigned_u.id
+      WHERE wi.workflow_template_id = $1
+      ORDER BY ca.assigned_at DESC
+      LIMIT $2
+    `, [id, Math.min(parseInt(limit), 50)]);
+
+    // Get recent course creations using this template
+    const courseCreationsResult = await query(`
+      SELECT 
+        c.created_at,
+        c.title as course_title,
+        c.id as course_id,
+        u.name as user_name,
+        u.email as user_email,
+        'course_created' as activity_type
+      FROM courses c
+      JOIN workflow_instances wi ON wi.course_id = c.id
+      JOIN users u ON c.created_by = u.id
+      WHERE wi.workflow_template_id = $1
+      ORDER BY c.created_at DESC
+      LIMIT $2
+    `, [id, Math.min(parseInt(limit), 50)]);
+
+    // Combine and sort all activities
+    const allActivities = [
+      ...transitionsResult.rows,
+      ...assignmentsResult.rows,
+      ...courseCreationsResult.rows
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+     .slice(0, parseInt(limit));
+
+    // Set cache control headers
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
+    res.json({
+      success: true,
+      data: {
+        activities: allActivities.map(activity => ({
+          id: activity.id || `${activity.activity_type}_${activity.created_at}`,
+          type: activity.activity_type,
+          courseId: activity.course_id,
+          courseTitle: activity.course_title,
+          userName: activity.user_name,
+          userEmail: activity.user_email,
+          assignedUserName: activity.assigned_user_name,
+          assignmentRole: activity.assignment_role,
+          fromState: activity.from_state,
+          toState: activity.to_state,
+          notes: activity.notes,
+          createdAt: activity.created_at
+        })),
+        total: allActivities.length
+      }
+    });
   });
 
   /**
    * GET /workflows/instances - Get all workflow instances
    */
   getWorkflowInstances = asyncHandler(async (req, res) => {
-    const client = await getClient();
     const { limit = 50, offset = 0 } = req.query;
 
-    try {
-      const result = await client.query(`
-        SELECT 
-          wi.id,
-          wi.course_id,
-          c.title as course_name,
-          wt.name as template_name,
-          ws.state_name as current_state,
-          wi.created_at as started_at,
-          wi.updated_at,
-          (
-            SELECT COUNT(*) FROM workflow_states 
-            WHERE workflow_template_id = wi.workflow_template_id
-          ) as total_stages,
-          (
-            SELECT COUNT(*) FROM workflow_states 
-            WHERE workflow_template_id = wi.workflow_template_id
-              AND id <= wi.current_state_id
-          ) as current_stage,
-          u.name as assigned_to
-        FROM workflow_instances wi
-        JOIN courses c ON wi.course_id = c.id
-        JOIN workflow_templates wt ON wi.workflow_template_id = wt.id
-        JOIN workflow_states ws ON wi.current_state_id = ws.id
-        LEFT JOIN course_assignments ca ON ca.course_id = c.id AND ca.role = 'owner'
-        LEFT JOIN users u ON ca.user_id = u.id
-        WHERE wi.status != 'completed'
-        ORDER BY wi.updated_at DESC
-        LIMIT $1 OFFSET $2
-      `, [limit, offset]);
+    const result = await query(`
+      SELECT 
+        wi.id,
+        wi.course_id,
+        c.title as "courseName",
+        wt.name as "templateName",
+        wi.current_state as "currentState",
+        wi.created_at as "startedAt",
+        (
+          SELECT COUNT(*) FROM workflow_states 
+          WHERE workflow_template_id = wi.workflow_template_id
+        ) as "totalStages",
+        1 as "currentStage",
+        u.name as "assignedTo"
+      FROM workflow_instances wi
+      JOIN courses c ON wi.course_id = c.id
+      JOIN workflow_templates wt ON wi.workflow_template_id = wt.id
+      LEFT JOIN course_assignments ca ON ca.course_id = c.id AND ca.role = 'owner'
+      LEFT JOIN users u ON ca.user_id = u.id
+      WHERE (wi.is_complete != true OR wi.is_complete IS NULL)
+        AND c.status != 'deleted'
+      ORDER BY wi.created_at DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
 
-      res.json({
-        success: true,
-        data: {
-          instances: result.rows
-        }
-      });
-    } finally {
-      client.release();
+    // Set cache control headers to prevent 304 responses
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
+    res.json({
+      success: true,
+      data: {
+        instances: result.rows
+      }
+    });
+  });
+
+  /**
+   * PUT /workflows/templates/:id - Update workflow template
+   */
+  updateWorkflowTemplate = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { name, description, is_active, stages, states, transitions } = req.body;
+
+    // Use stages or states (both are acceptable)
+    const stageList = stages || states || [];
+
+    // Create validation schema without states validation for update
+    const updateSchema = Joi.object({
+      name: Joi.string().min(3).max(100).required(),
+      description: Joi.string().max(500).optional().allow(null),
+      is_active: Joi.boolean().default(true),
+      stages: Joi.array().optional(),
+      states: Joi.array().optional(),
+      transitions: Joi.array().optional()
+    });
+
+    // Validate input
+    const { error, value } = updateSchema.validate(req.body);
+    if (error) {
+      throw new ValidationError('Invalid workflow template data', error.details);
     }
+
+    const updatedTemplate = await transaction(async (client) => {
+      // Update template basic info
+      const templateResult = await client.query(`
+        UPDATE workflow_templates 
+        SET name = $1, description = $2, is_active = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4
+        RETURNING *
+      `, [name, description || null, is_active !== false, id]);
+
+      if (templateResult.rows.length === 0) {
+        throw new ValidationError('Workflow template not found');
+      }
+
+      const template = templateResult.rows[0];
+
+      // Update stages if provided
+      if (stageList && Array.isArray(stageList)) {
+        // Delete existing stages
+        await client.query('DELETE FROM workflow_states WHERE workflow_template_id = $1', [id]);
+        
+        // Create new stages
+        for (const stage of stageList) {
+          await client.query(`
+            INSERT INTO workflow_states (
+              workflow_template_id, state_name, display_name, is_initial, is_final, 
+              state_config, position_x, position_y, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+          `, [
+            id, 
+            stage.state_name, 
+            stage.display_name,
+            stage.is_initial || false,
+            stage.is_final || false,
+            JSON.stringify(stage.state_config || {}),
+            stage.position_x || 0,
+            stage.position_y || 0
+          ]);
+        }
+      }
+
+      return template;
+    });
+
+    logger.info('Workflow template updated', {
+      templateId: id,
+      name: updatedTemplate.name,
+      stageCount: stageList.length,
+      updatedBy: req.user.id
+    });
+
+    res.json({
+      success: true,
+      data: {
+        template: updatedTemplate,
+        message: 'Workflow template updated successfully'
+      }
+    });
+  });
+
+  /**
+   * DELETE /workflows/templates/:id - Delete workflow template
+   */
+  deleteWorkflowTemplate = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Check if template is in use
+    const usageCheck = await query(
+      'SELECT COUNT(*) as count FROM workflow_instances WHERE workflow_template_id = $1',
+      [id]
+    );
+
+    if (parseInt(usageCheck.rows[0].count) > 0) {
+      throw new ValidationError('Cannot delete template that is in use by workflow instances');
+    }
+
+    await transaction(async (client) => {
+      // Delete workflow states first
+      await client.query('DELETE FROM workflow_states WHERE workflow_template_id = $1', [id]);
+      
+      // Delete workflow transitions
+      await client.query('DELETE FROM workflow_transitions WHERE workflow_template_id = $1', [id]);
+      
+      // Delete template
+      const result = await client.query('DELETE FROM workflow_templates WHERE id = $1 RETURNING name', [id]);
+      
+      if (result.rows.length === 0) {
+        throw new ValidationError('Workflow template not found');
+      }
+    });
+
+    logger.info('Workflow template deleted', {
+      templateId: id,
+      deletedBy: req.user.id
+    });
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Workflow template deleted successfully'
+      }
+    });
+  });
+
+  /**
+   * POST /workflows/templates/:id/stages - Add stage to template
+   */
+  addStageToTemplate = asyncHandler(async (req, res) => {
+    const { id: templateId } = req.params;
+    const { state_name, display_name, is_initial, is_final, state_config, position_x, position_y } = req.body;
+
+    const stageResult = await query(`
+      INSERT INTO workflow_states (
+        workflow_template_id, state_name, display_name, is_initial, is_final, 
+        state_config, position_x, position_y, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+      RETURNING *
+    `, [
+      templateId, 
+      state_name, 
+      display_name,
+      is_initial || false,
+      is_final || false,
+      JSON.stringify(state_config || {}),
+      position_x || 0,
+      position_y || 0
+    ]);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        stage: stageResult.rows[0],
+        message: 'Stage added successfully'
+      }
+    });
+  });
+
+  /**
+   * PUT /workflows/templates/:id/stages/:stageId - Update stage
+   */
+  updateStage = asyncHandler(async (req, res) => {
+    const { stageId } = req.params;
+    const updates = req.body;
+
+    const setClause = Object.keys(updates)
+      .map((key, index) => `${key} = $${index + 2}`)
+      .join(', ');
+    
+    const values = Object.values(updates);
+
+    const result = await query(`
+      UPDATE workflow_states 
+      SET ${setClause}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `, [stageId, ...values]);
+
+    if (result.rows.length === 0) {
+      throw new ValidationError('Stage not found');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        stage: result.rows[0],
+        message: 'Stage updated successfully'
+      }
+    });
+  });
+
+  /**
+   * DELETE /workflows/templates/:id/stages/:stageId - Delete stage
+   */
+  deleteStage = asyncHandler(async (req, res) => {
+    const { stageId } = req.params;
+
+    const result = await query('DELETE FROM workflow_states WHERE id = $1 RETURNING *', [stageId]);
+
+    if (result.rows.length === 0) {
+      throw new ValidationError('Stage not found');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Stage deleted successfully'
+      }
+    });
+  });
+
+  /**
+   * POST /workflows/templates/:id/transitions - Add transition
+   */
+  addTransition = asyncHandler(async (req, res) => {
+    const { id: templateId } = req.params;
+    const { from_stage_id, to_stage_id, condition_type, condition_config } = req.body;
+
+    const transitionResult = await query(`
+      INSERT INTO workflow_stage_transitions (
+        workflow_template_id, from_stage_id, to_stage_id, condition_type, condition_config, created_at
+      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      RETURNING *
+    `, [templateId, from_stage_id, to_stage_id, condition_type || 'manual', JSON.stringify(condition_config || {})]);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        transition: transitionResult.rows[0],
+        message: 'Transition added successfully'
+      }
+    });
+  });
+
+  /**
+   * DELETE /workflows/templates/:id/transitions/:transitionId - Delete transition
+   */
+  deleteTransition = asyncHandler(async (req, res) => {
+    const { transitionId } = req.params;
+
+    const result = await query('DELETE FROM workflow_stage_transitions WHERE id = $1 RETURNING *', [transitionId]);
+
+    if (result.rows.length === 0) {
+      throw new ValidationError('Transition not found');
+    }
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Transition deleted successfully'
+      }
+    });
   });
 }
 

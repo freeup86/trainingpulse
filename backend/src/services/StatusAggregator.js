@@ -77,21 +77,21 @@ class StatusAggregator {
       let calculationMethod;
       
       if (stats.total_weight > 0) {
-        percentage = Math.round((stats.completed_weight / stats.total_weight) * 100);
+        percentage = Math.round((Number(stats.completed_weight || 0) / Number(stats.total_weight)) * 100);
         calculationMethod = 'weighted';
       } else {
-        percentage = Math.round((stats.completed_subtasks / stats.total_subtasks) * 100);
+        percentage = Math.round((Number(stats.completed_subtasks || 0) / Number(stats.total_subtasks || 1)) * 100);
         calculationMethod = 'simple';
       }
 
       return {
-        percentage: Math.min(percentage, 100),
-        totalSubtasks: parseInt(stats.total_subtasks),
-        completedSubtasks: parseInt(stats.completed_subtasks),
-        hasBlockingIncomplete: parseInt(stats.blocking_incomplete) > 0,
+        percentage: isNaN(percentage) ? 0 : Math.min(percentage, 100),
+        totalSubtasks: parseInt(stats.total_subtasks || 0),
+        completedSubtasks: parseInt(stats.completed_subtasks || 0),
+        hasBlockingIncomplete: parseInt(stats.blocking_incomplete || 0) > 0,
         calculationMethod,
-        totalWeight: parseInt(stats.total_weight),
-        completedWeight: parseInt(stats.completed_weight)
+        totalWeight: parseInt(stats.total_weight || 0),
+        completedWeight: parseInt(stats.completed_weight || 0)
       };
 
     } catch (error) {

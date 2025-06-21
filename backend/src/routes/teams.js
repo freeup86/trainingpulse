@@ -19,7 +19,7 @@ router.get('/',
   validateRequest,
   async (req, res, next) => {
     try {
-      const { search, active, limit = 50, offset = 0 } = req.query;
+      const { search, active = true, limit = 50, offset = 0 } = req.query;
       
       let whereConditions = [];
       let queryParams = [];
@@ -31,9 +31,10 @@ router.get('/',
         paramCounter++;
       }
 
-      if (active !== undefined) {
+      // Always filter by active status unless explicitly set to 'all'
+      if (active !== 'all') {
         whereConditions.push(`t.active = $${paramCounter}`);
-        queryParams.push(active);
+        queryParams.push(active === 'true' || active === true);
         paramCounter++;
       }
 
@@ -411,6 +412,60 @@ router.delete('/:id/members/:userId',
       res.json({
         success: true,
         message: 'Member removed successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// Delete team
+router.delete('/:id',
+  authenticate,
+  authorize(['admin']),
+  [
+    param('id').isInt()
+  ],
+  validateRequest,
+  async (req, res, next) => {
+    try {
+      const { id } = req.params;
+
+      // Check if team exists
+      const teamCheck = await db('SELECT * FROM teams WHERE id = $1', [id]);
+      if (teamCheck.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Team not found'
+        });
+      }
+
+      const team = teamCheck.rows[0];
+
+      // Use transaction to ensure data consistency
+      await transaction(async (client) => {
+        // Remove all users from the team (set team_id to null)
+        await client.query(
+          'UPDATE users SET team_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE team_id = $1',
+          [id]
+        );
+
+        // Delete the team (soft delete by setting active to false, or hard delete)
+        await client.query(
+          'UPDATE teams SET active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+          [id]
+        );
+      });
+
+      logger.info('Team deleted', {
+        teamId: id,
+        teamName: team.name,
+        deletedBy: req.user.id
+      });
+
+      res.json({
+        success: true,
+        message: 'Team deleted successfully'
       });
     } catch (error) {
       next(error);

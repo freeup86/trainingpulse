@@ -2,10 +2,13 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { CompactModeProvider } from './contexts/CompactModeContext';
 import { AppShell } from './components/layout/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
 import CoursesPage from './pages/CoursesPage';
+import CourseDetailPage from './pages/CourseDetailPage';
 import NotificationsPage from './pages/NotificationsPage';
 import TeamsPage from './pages/TeamsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
@@ -13,6 +16,11 @@ import WorkflowsPage from './pages/WorkflowsPage';
 import BulkOperationsPage from './pages/BulkOperationsPage';
 import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
+import CreateCoursePage from './pages/CreateCoursePage';
+import EditCoursePage from './pages/EditCoursePage';
+import CreateTeamPage from './pages/CreateTeamPage';
+import EditTeamPage from './pages/EditTeamPage';
+import WorkflowCreatePage from './pages/WorkflowCreatePage';
 import TestPage from './pages/TestPage';
 import MinimalPage from './pages/MinimalPage';
 
@@ -69,6 +77,8 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <Router>
         <AuthProvider>
+          <ThemeProvider>
+            <CompactModeProvider>
           <div className="App">
             <Routes>
               {/* Public routes */}
@@ -94,9 +104,16 @@ function App() {
                 <Route path="dashboard" element={<DashboardPage />} />
                 {/* Additional routes will be added here */}
                 <Route path="courses" element={<CoursesPage />} />
+                <Route path="courses/create" element={<CreateCoursePage />} />
+                <Route path="courses/:id" element={<CourseDetailPage />} />
+                <Route path="courses/:id/edit" element={<EditCoursePage />} />
                 <Route path="teams" element={<TeamsPage />} />
+                <Route path="teams/create" element={<CreateTeamPage />} />
+                <Route path="teams/:id/edit" element={<EditTeamPage />} />
                 <Route path="analytics" element={<AnalyticsPage />} />
                 <Route path="workflows" element={<WorkflowsPage />} />
+                <Route path="workflows/create" element={<WorkflowCreatePage />} />
+                <Route path="workflows/:id/edit" element={<WorkflowCreatePage />} />
                 <Route path="bulk" element={<BulkOperationsPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
@@ -135,6 +152,8 @@ function App() {
               }}
             />
           </div>
+            </CompactModeProvider>
+          </ThemeProvider>
         </AuthProvider>
       </Router>
     </QueryClientProvider>

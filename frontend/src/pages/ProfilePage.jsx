@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   User, 
   Edit,
@@ -20,7 +21,7 @@ import {
   Save,
   X
 } from 'lucide-react';
-// import { users, courses, auth } from '../lib/api';
+import { users, courses } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
 import toast from 'react-hot-toast';
@@ -38,85 +39,45 @@ function ProfilePage() {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedTab, setSelectedTab] = useState('overview');
   const { user, logout } = useAuth();
+  const queryClient = useQueryClient();
 
-  // Mock data instead of API calls for now
-  const profileData = {
-    data: user || {
-      id: 1,
-      name: 'John Doe',
-      email: 'john@example.com',
-      role: 'designer',
-      team: 'Design Team',
-      dailyCapacityHours: 8,
-      createdAt: '2024-01-01T00:00:00Z',
-      lastLogin: '2024-01-15T10:00:00Z'
-    }
-  };
-  
-  const statsData = {
-    data: {
-      completedCourses: 12,
-      activeCourses: 3,
-      completionRate: 87,
-      reviewsGiven: 25
-    }
-  };
-  
-  const activityData = {
-    data: {
-      activities: [
-        {
-          id: 1,
-          type: 'course_updated',
-          description: 'Updated JavaScript Fundamentals course',
-          createdAt: '2024-01-15T10:00:00Z'
-        },
-        {
-          id: 2,
-          type: 'review_submitted',
-          description: 'Submitted review for React Advanced Concepts',
-          createdAt: '2024-01-14T15:30:00Z'
-        }
-      ]
-    }
-  };
-  
-  const assignmentsData = {
-    data: {
-      courses: [
-        {
-          id: 1,
-          title: 'JavaScript Fundamentals',
-          description: 'Learn the basics of JavaScript programming',
-          workflowState: 'review',
-          priority: 'high',
-          dueDate: '2024-02-15'
-        },
-        {
-          id: 2,
-          title: 'React Advanced Concepts',
-          description: 'Advanced React patterns and best practices',
-          workflowState: 'content_development',
-          priority: 'medium',
-          dueDate: '2024-02-28'
-        }
-      ]
-    }
-  };
-  
-  const isLoading = false;
+  // Fetch user stats
+  const { data: statsData, isLoading: statsLoading } = useQuery({
+    queryKey: ['user-stats', user?.id],
+    queryFn: () => users.getStats(user.id),
+    enabled: Boolean(user?.id)
+  });
+
+  // Fetch user activity
+  const { data: activityData, isLoading: activityLoading } = useQuery({
+    queryKey: ['user-activity', user?.id],
+    queryFn: () => users.getActivity(user.id, { limit: 20 }),
+    enabled: Boolean(user?.id)
+  });
+
+  // Fetch user assignments (courses assigned to user)
+  const { data: assignmentsData, isLoading: assignmentsLoading } = useQuery({
+    queryKey: ['user-courses', user?.id],
+    queryFn: () => courses.getByUser(user.id),
+    enabled: Boolean(user?.id)
+  });
+
+  const isLoading = statsLoading || activityLoading || assignmentsLoading;
   const error = null;
 
-  const updateProfile = {
-    mutate: (updates) => {
-      // Mock update
-      setTimeout(() => {
-        toast.success('Profile updated successfully');
-        setIsEditing(false);
-      }, 500);
+  // Update profile mutation
+  const updateProfile = useMutation({
+    mutationFn: (updates) => users.updateCurrent(updates),
+    onSuccess: () => {
+      toast.success('Profile updated successfully');
+      setIsEditing(false);
+      queryClient.invalidateQueries(['user-stats']);
+      queryClient.invalidateQueries(['auth']);
     },
-    isPending: false
-  };
+    onError: (error) => {
+      toast.error(error.response?.data?.error?.message || 'Failed to update profile');
+    }
+  });
 
   if (isLoading) {
     return (
@@ -148,7 +109,7 @@ function ProfilePage() {
     );
   }
 
-  const profile = profileData?.data || user;
+  const profile = user;
   const stats = statsData?.data || {};
   const activities = activityData?.data?.activities || [];
   const assignments = assignmentsData?.data?.courses || [];
@@ -245,7 +206,7 @@ function ProfilePage() {
                     Courses Completed
                   </dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {stats.completedCourses || 0}
+                    {stats.coursesCompleted || 0}
                   </dd>
                 </dl>
               </div>
@@ -265,7 +226,7 @@ function ProfilePage() {
                     Active Assignments
                   </dt>
                   <dd className="text-lg font-medium text-gray-900">
-                    {stats.activeCourses || 0}
+                    {stats.activeAssignments || 0}
                   </dd>
                 </dl>
               </div>
@@ -535,8 +496,8 @@ function ProfileAssignments({ assignments }) {
                     </p>
                   )}
                   <div className="mt-2 flex items-center text-sm text-gray-500 space-x-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(assignment.workflowState, 'badge')}`}>
-                      {assignment.workflowState?.replace('_', ' ')}
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(assignment.status, 'badge')}`}>
+                      {assignment.status?.replace('_', ' ')}
                     </span>
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(assignment.priority, 'badge')}`}>
                       {assignment.priority}

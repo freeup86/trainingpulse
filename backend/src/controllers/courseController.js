@@ -12,7 +12,11 @@ const createCourseSchema = Joi.object({
   type: Joi.string().valid('standard', 'compliance', 'certification').default('standard'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
   startDate: Joi.date().optional(),
-  dueDate: Joi.date().min(Joi.ref('startDate')).required(),
+  dueDate: Joi.date().required().when('startDate', {
+    is: Joi.exist(),
+    then: Joi.date().min(Joi.ref('startDate')),
+    otherwise: Joi.date()
+  }),
   estimatedHours: Joi.number().integer().min(1).max(1000).optional(),
   estimatedDailyHours: Joi.number().precision(2).min(0.5).max(16).optional(),
   workflowTemplateId: Joi.number().integer().positive().required(),
@@ -21,6 +25,15 @@ const createCourseSchema = Joi.object({
     Joi.object({
       userId: Joi.number().integer().positive().required(),
       role: Joi.string().valid('owner', 'designer', 'reviewer', 'approver', 'sme').required()
+    })
+  ).optional(),
+  tasks: Joi.array().items(
+    Joi.object({
+      title: Joi.string().min(1).max(255).required().trim(),
+      status: Joi.string().valid('pending', 'in_progress', 'completed', 'on_hold').default('pending'),
+      isBlocking: Joi.boolean().default(false),
+      weight: Joi.number().integer().min(1).max(100).default(1),
+      orderIndex: Joi.number().integer().min(0).optional()
     })
   ).optional()
 });
@@ -82,6 +95,12 @@ class CourseController {
     
     // Add complex filters
     let additionalWhere = [];
+    
+    // Exclude deleted courses unless specifically requested
+    if (!status || status !== 'deleted') {
+      additionalWhere.push(`c.status != $${++paramCount}`);
+      values.push('deleted');
+    }
     
     if (assignee) {
       additionalWhere.push(`EXISTS (SELECT 1 FROM course_assignments ca WHERE ca.course_id = c.id AND ca.user_id = $${++paramCount})`);
@@ -191,7 +210,8 @@ class CourseController {
       estimatedDailyHours,
       workflowTemplateId,
       metadata,
-      assignments = []
+      assignments = [],
+      tasks = []
     } = value;
 
     // Check if workflow template exists
@@ -234,8 +254,8 @@ class CourseController {
 
       await client.query(`
         INSERT INTO workflow_instances (
-          course_id, workflow_template_id, current_state, state_entered_at, created_at
-        ) VALUES ($1, $2, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          course_id, workflow_template_id, current_state, state_entered_at, is_complete, created_at
+        ) VALUES ($1, $2, $3, CURRENT_TIMESTAMP, false, CURRENT_TIMESTAMP)
       `, [newCourse.id, workflowTemplateId, initialState]);
 
       // Create workflow transition record
@@ -256,6 +276,23 @@ class CourseController {
         `, [newCourse.id, assignment.userId, assignment.role, req.user.id]);
       }
 
+      // Create initial tasks/subtasks
+      for (let i = 0; i < tasks.length; i++) {
+        const task = tasks[i];
+        await client.query(`
+          INSERT INTO course_subtasks (
+            course_id, title, status, is_blocking, weight, order_index, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `, [
+          newCourse.id, 
+          task.title, 
+          task.status || 'pending', 
+          task.isBlocking || false, 
+          task.weight || 1, 
+          task.orderIndex !== undefined ? task.orderIndex : i + 1
+        ]);
+      }
+
       // Create audit log
       await client.query(`
         INSERT INTO audit_logs (
@@ -271,7 +308,8 @@ class CourseController {
           type,
           priority,
           workflowTemplateId,
-          assignmentCount: assignments.length
+          assignmentCount: assignments.length,
+          taskCount: tasks.length
         })
       ]);
 

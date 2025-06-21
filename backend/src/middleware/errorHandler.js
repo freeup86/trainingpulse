@@ -111,6 +111,17 @@ const errorHandler = (error, req, res, next) => {
     }
   }
   
+  // Handle our custom ValidationError class
+  else if (error.code === 'VALIDATION_ERROR' && error.details) {
+    statusCode = error.statusCode || 400;
+    errorResponse.error.code = error.code;
+    errorResponse.error.message = error.message;
+    errorResponse.error.details = error.details.map(detail => ({
+      field: detail.path?.join('.') || detail.context?.key,
+      message: detail.message
+    }));
+  }
+  
   // Log error with context
   const logContext = {
     errorId,

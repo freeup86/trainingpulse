@@ -1,6 +1,7 @@
 const Joi = require('joi');
 const BottleneckAnalyzer = require('../services/BottleneckAnalyzer');
 const ResourceHeatmapService = require('../services/ResourceHeatmapService');
+const PerformanceAnalyzer = require('../services/PerformanceAnalyzer');
 const { asyncHandler, ValidationError, AuthorizationError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -11,16 +12,24 @@ const bottleneckAnalysisSchema = Joi.object({
   threshold: Joi.number().min(1.5).max(5.0).default(2.0),
   includeResolved: Joi.boolean().default(false),
   teamId: Joi.number().integer().positive().optional(),
-  courseType: Joi.string().valid('instructor_led', 'elearning', 'blended', 'microlearning', 'certification').optional()
+  courseType: Joi.string().valid('instructor_led', 'elearning', 'blended', 'microlearning', 'certification').optional(),
+  limit: Joi.number().integer().min(1).max(100).default(10)
 });
 
 const workloadAnalysisSchema = Joi.object({
-  startDate: Joi.date().required(),
-  endDate: Joi.date().min(Joi.ref('startDate')).required(),
+  period: Joi.string().valid('7d', '30d', '90d', '6m', '1y').optional(),
+  startDate: Joi.date().optional(),
+  endDate: Joi.date().min(Joi.ref('startDate')).optional(),
   teamId: Joi.number().integer().positive().optional(),
   userIds: Joi.array().items(Joi.number().integer().positive()).optional(),
   includeWeekends: Joi.boolean().default(false),
   capacityType: Joi.string().valid('hours', 'courses', 'workload').default('hours')
+}).custom((value, helpers) => {
+  // Either period OR (startDate and endDate) must be provided
+  if (!value.period && (!value.startDate || !value.endDate)) {
+    return helpers.error('any.custom', { message: 'Either period or both startDate and endDate must be provided' });
+  }
+  return value;
 });
 
 const impactAnalysisSchema = Joi.object({
@@ -29,10 +38,19 @@ const impactAnalysisSchema = Joi.object({
   maxDepth: Joi.number().integer().min(1).max(10).default(5)
 });
 
+const performanceAnalysisSchema = Joi.object({
+  period: Joi.string().valid('7d', '30d', '90d', '6m', '1y').default('30d'),
+  teamId: Joi.number().integer().positive().optional(),
+  courseType: Joi.string().valid('instructor_led', 'elearning', 'blended', 'microlearning', 'certification').optional(),
+  groupBy: Joi.string().valid('team', 'user', 'course_type', 'priority').default('team'),
+  includeCompleted: Joi.boolean().default(true)
+});
+
 class AnalyticsController {
   constructor() {
     this.bottleneckAnalyzer = new BottleneckAnalyzer();
     this.resourceHeatmapService = new ResourceHeatmapService();
+    this.performanceAnalyzer = new PerformanceAnalyzer();
   }
 
   /**
@@ -45,7 +63,7 @@ class AnalyticsController {
       throw new ValidationError('Invalid analysis parameters', error.details);
     }
 
-    const { period, groupBy, threshold, includeResolved, teamId, courseType } = value;
+    const { period, groupBy, threshold, includeResolved, teamId, courseType, limit } = value;
 
     // Role-based filtering
     let finalTeamId = teamId;
@@ -63,7 +81,8 @@ class AnalyticsController {
       threshold,
       includeResolved,
       teamId: finalTeamId,
-      courseType
+      courseType,
+      limit
     });
 
     logger.info('Bottleneck analysis completed', {
@@ -90,7 +109,25 @@ class AnalyticsController {
       throw new ValidationError('Invalid workload parameters', error.details);
     }
 
-    const { startDate, endDate, teamId, userIds, includeWeekends, capacityType } = value;
+    const { period, startDate, endDate, teamId, userIds, includeWeekends, capacityType } = value;
+
+    // Convert period to date range if provided
+    let finalStartDate = startDate;
+    let finalEndDate = endDate;
+    
+    if (period) {
+      const periodMap = {
+        '7d': 7,
+        '30d': 30,
+        '90d': 90,
+        '6m': 180,
+        '1y': 365
+      };
+      const daysAgo = periodMap[period] || 30;
+      finalEndDate = new Date();
+      finalStartDate = new Date();
+      finalStartDate.setDate(finalStartDate.getDate() - daysAgo);
+    }
 
     // Role-based filtering
     let finalTeamId = teamId;
@@ -104,8 +141,8 @@ class AnalyticsController {
     }
 
     const workloadData = await this.resourceHeatmapService.generateHeatmap({
-      startDate,
-      endDate,
+      startDate: finalStartDate,
+      endDate: finalEndDate,
       teamId: finalTeamId,
       userIds: finalUserIds,
       includeWeekends,
@@ -113,17 +150,64 @@ class AnalyticsController {
     });
 
     logger.info('Workload analysis completed', {
-      startDate,
-      endDate,
+      period,
+      startDate: finalStartDate,
+      endDate: finalEndDate,
       teamId: finalTeamId,
       userId: req.user.id,
-      usersAnalyzed: workloadData.heatmap.length,
-      insights: workloadData.insights.length
+      usersAnalyzed: workloadData.heatmap?.length || 0,
+      insights: workloadData.insights?.length || 0
     });
 
     res.json({
       success: true,
       data: workloadData
+    });
+  });
+
+  /**
+   * GET /analytics/performance - Get performance metrics and trends
+   */
+  getPerformance = asyncHandler(async (req, res) => {
+    // Validate query parameters
+    const { error, value } = performanceAnalysisSchema.validate(req.query);
+    if (error) {
+      throw new ValidationError('Invalid performance analysis parameters', error.details);
+    }
+
+    const { period, teamId, courseType, groupBy, includeCompleted } = value;
+
+    // Role-based filtering
+    let finalTeamId = teamId;
+    if (req.user.role === 'manager' && !teamId) {
+      // Managers see their team by default
+      finalTeamId = req.user.team_id;
+    } else if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+      // Other roles see only their team
+      finalTeamId = req.user.team_id;
+    }
+
+    const performanceData = await this.performanceAnalyzer.analyzePerformance({
+      period,
+      teamId: finalTeamId,
+      courseType,
+      groupBy,
+      includeCompleted
+    });
+
+    logger.info('Performance analysis completed', {
+      period,
+      teamId: finalTeamId,
+      courseType,
+      groupBy,
+      userId: req.user.id,
+      totalCourses: performanceData.summary.totalCourses,
+      completionRate: performanceData.summary.completionRate
+    });
+
+    res.json({
+      success: true,
+      data: performanceData
     });
   });
 

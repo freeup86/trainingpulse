@@ -433,8 +433,8 @@ class NotificationService {
    */
   async getNotificationsForDigest(userId, maxAge, includeRead) {
     try {
-      let whereClause = 'WHERE user_id = $1 AND n.created_at > NOW() - INTERVAL \'$2 hours\'';
-      const params = [userId, maxAge];
+      let whereClause = `WHERE user_id = $1 AND n.created_at > NOW() - INTERVAL '${maxAge} hours'`;
+      const params = [userId];
 
       if (!includeRead) {
         whereClause += ' AND read_at IS NULL';

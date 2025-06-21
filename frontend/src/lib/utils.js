@@ -50,70 +50,54 @@ export const formatDuration = (hours) => {
 
 // Status and priority utilities
 export const getStatusColor = (status, variant = 'badge') => {
-  if (variant === 'badge') {
-    const colors = {
-      'draft': 'bg-gray-100 text-gray-800',
-      'content_development': 'bg-blue-100 text-blue-800',
-      'review': 'bg-yellow-100 text-yellow-800',
-      'approval': 'bg-orange-100 text-orange-800',
-      'published': 'bg-green-100 text-green-800',
-      'archived': 'bg-gray-100 text-gray-800',
-      'not_started': 'bg-gray-100 text-gray-800',
-      'in_progress': 'bg-blue-100 text-blue-800',
-      'completed': 'bg-green-100 text-green-800',
-      'cancelled': 'bg-red-100 text-red-800',
-      'on_hold': 'bg-purple-100 text-purple-800',
-      'overdue': 'bg-red-100 text-red-800',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  }
-  
   const colors = {
-    'draft': 'bg-gray-100 text-gray-800',
-    'content_development': 'bg-blue-100 text-blue-800', 
-    'review': 'bg-yellow-100 text-yellow-800',
-    'approval': 'bg-orange-100 text-orange-800',
-    'published': 'bg-green-100 text-green-800',
-    'archived': 'bg-gray-100 text-gray-800',
-    'not_started': 'bg-gray-100 text-gray-800',
-    'in_progress': 'bg-blue-100 text-blue-800',
-    'completed': 'bg-green-100 text-green-800',
-    'cancelled': 'bg-red-100 text-red-800',
-    'on_hold': 'bg-purple-100 text-purple-800',
-    'overdue': 'bg-red-100 text-red-800',
+    'draft': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+    'content_development': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    'review': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    'approval': 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
+    'published': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    'archived': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+    'not_started': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+    'in_progress': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    'completed': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    'cancelled': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+    'on_hold': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+    'overdue': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+    'planning': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
+    'legal_review': 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   };
-  return colors[status] || 'bg-gray-100 text-gray-800';
+  return colors[status] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
 };
 
 export const getPriorityColor = (priority, variant = 'default') => {
   if (variant === 'badge') {
     const colors = {
-      'low': 'bg-gray-100 text-gray-700',
-      'medium': 'bg-yellow-100 text-yellow-700',
-      'high': 'bg-orange-100 text-orange-700',
-      'critical': 'bg-red-100 text-red-700',
+      'low': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+      'medium': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+      'high': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+      'critical': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
     };
-    return colors[priority] || 'bg-gray-100 text-gray-700';
+    return colors[priority] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
   }
   
   const colors = {
-    'low': 'bg-gray-100 text-gray-700',
-    'medium': 'bg-yellow-100 text-yellow-700',
-    'high': 'bg-orange-100 text-orange-700',
-    'critical': 'bg-red-100 text-red-700',
+    'low': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+    'medium': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+    'high': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+    'critical': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
   };
-  return colors[priority] || 'bg-gray-100 text-gray-700';
+  return colors[priority] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
 };
 
 export const getRoleColor = (role) => {
   const colors = {
-    'admin': 'bg-purple-100 text-purple-800',
-    'manager': 'bg-blue-100 text-blue-800',
-    'designer': 'bg-green-100 text-green-800',
-    'reviewer': 'bg-yellow-100 text-yellow-800',
-    'viewer': 'bg-gray-100 text-gray-800',
+    'admin': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+    'manager': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+    'designer': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    'reviewer': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    'viewer': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200',
   };
-  return colors[role] || 'bg-gray-100 text-gray-800';
+  return colors[role] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
 };
 
 export const getWorkflowStatusColor = (status) => {

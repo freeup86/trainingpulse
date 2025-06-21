@@ -516,7 +516,7 @@ class ResourceHeatmapService {
             COALESCE(c.estimated_daily_hours, 
               CASE 
                 WHEN c.estimated_hours IS NOT NULL AND c.start_date IS NOT NULL AND c.due_date IS NOT NULL
-                THEN c.estimated_hours / GREATEST(1, EXTRACT(days FROM (c.due_date - c.start_date)))
+                THEN c.estimated_hours / GREATEST(1, (c.due_date - c.start_date))
                 ELSE 2.0 
               END
             )
