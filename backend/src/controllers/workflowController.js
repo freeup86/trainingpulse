@@ -69,14 +69,24 @@ class WorkflowController {
         ORDER BY id
       `, [template.id]);
 
-      template.states = statesResult.rows.map(state => ({
-        id: state.id,
-        state_name: state.state_name,
-        display_name: state.display_name,
-        is_initial: state.is_initial,
-        is_final: state.is_final,
-        state_config: state.state_config ? JSON.parse(state.state_config) : {}
-      }));
+      template.states = statesResult.rows.map(state => {
+        let stateConfig = {};
+        try {
+          stateConfig = state.state_config ? JSON.parse(state.state_config) : {};
+        } catch (error) {
+          console.warn(`Invalid JSON in state_config for state ${state.id}:`, state.state_config);
+          stateConfig = {};
+        }
+        
+        return {
+          id: state.id,
+          state_name: state.state_name,
+          display_name: state.display_name,
+          is_initial: state.is_initial,
+          is_final: state.is_final,
+          state_config: stateConfig
+        };
+      });
     }
 
     // Set cache control headers to prevent 304 responses

@@ -77,6 +77,7 @@ class CourseController {
       dueBefore,
       dueAfter,
       search,
+      workflowState,
       page = 1,
       limit = 20,
       sort = 'due_date',
@@ -122,23 +123,31 @@ class CourseController {
       values.push(`%${search}%`, `%${search}%`);
     }
 
+    // Workflow state filtering
+    if (workflowState) {
+      additionalWhere.push(`wi.current_state = $${++paramCount}`);
+      values.push(workflowState);
+    }
+
     // Role-based filtering
     if (req.user.role !== 'admin' && req.user.role !== 'manager') {
       additionalWhere.push(`EXISTS (SELECT 1 FROM course_assignments ca WHERE ca.course_id = c.id AND ca.user_id = $${++paramCount})`);
       values.push(req.user.id);
     }
 
-    const finalWhere = [where, ...additionalWhere].filter(Boolean).join(' AND ');
-    const whereClause = finalWhere ? `WHERE ${finalWhere}` : '';
+    const allConditions = [where, ...additionalWhere].filter(Boolean);
+    const whereClause = allConditions.length > 0 ? `WHERE ${allConditions.join(' AND ')}` : '';
 
     // Pagination and ordering
     const { limit: finalLimit, offset } = buildPaginationClause(parseInt(page), parseInt(limit));
     const orderClause = buildOrderClause(sort, order);
 
-    // Get total count
+    // Get total count (with same JOINs for consistent filtering)
     const countResult = await query(`
-      SELECT COUNT(*) as total
+      SELECT COUNT(DISTINCT c.id) as total
       FROM courses c
+      LEFT JOIN workflow_instances wi ON c.id = wi.course_id AND wi.is_complete = false
+      LEFT JOIN workflow_templates wt ON wi.workflow_template_id = wt.id
       ${whereClause}
     `, values);
 
