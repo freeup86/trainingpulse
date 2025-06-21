@@ -24,14 +24,12 @@ const WORKFLOW_STATES = {
   'draft': { icon: Circle, label: 'Draft', color: 'text-gray-500 dark:text-gray-400' },
   'planning': { icon: Circle, label: 'Planning', color: 'text-gray-500 dark:text-gray-400' },
   'content_development': { icon: Clock, label: 'Development', color: 'text-blue-500 dark:text-blue-400' },
-  'development': { icon: Clock, label: 'Development', color: 'text-blue-500 dark:text-blue-400' },
   'review': { icon: AlertTriangle, label: 'Review', color: 'text-yellow-500 dark:text-yellow-400' },
   'sme_review': { icon: AlertTriangle, label: 'SME Review', color: 'text-yellow-500 dark:text-yellow-400' },
   'instructional_review': { icon: AlertTriangle, label: 'Instructional Review', color: 'text-yellow-500 dark:text-yellow-400' },
   'legal_review': { icon: AlertTriangle, label: 'Legal Review', color: 'text-orange-500 dark:text-orange-400' },
   'compliance_review': { icon: AlertTriangle, label: 'Compliance Review', color: 'text-orange-500 dark:text-orange-400' },
   'final_approval': { icon: Pause, label: 'Final Approval', color: 'text-orange-500 dark:text-orange-400' },
-  'approval': { icon: Pause, label: 'Approval', color: 'text-orange-500 dark:text-orange-400' },
   'published': { icon: CheckCircle, label: 'Published', color: 'text-green-500 dark:text-green-400' },
   'on_hold': { icon: Pause, label: 'On Hold', color: 'text-red-500 dark:text-red-400' },
   'archived': { icon: Circle, label: 'Archived', color: 'text-gray-400 dark:text-gray-500' }
@@ -541,12 +539,6 @@ function CourseSubtasks({ courseId }) {
               <div className="flex-1">
                 <div className="flex items-center space-x-2">
                   <span className="text-sm text-gray-900 dark:text-white">{task.title}</span>
-                  {task.is_blocking && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300">
-                      <AlertTriangle className="h-3 w-3 mr-1" />
-                      Blocking
-                    </span>
-                  )}
                   <span className={`text-xs ${statusColor}`}>
                     {task.status.replace('_', ' ')}
                   </span>

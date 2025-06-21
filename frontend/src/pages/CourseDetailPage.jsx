@@ -305,11 +305,7 @@ export default function CourseDetailPage() {
                             return (
                               <div 
                                 key={subtask.id} 
-                                className={`flex items-start space-x-3 p-3 rounded-lg border ${
-                                  subtask.is_blocking 
-                                    ? 'border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-900/10' 
-                                    : 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50'
-                                }`}
+                                className="flex items-start space-x-3 p-3 rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50"
                               >
                                 <div className="flex-shrink-0 mt-0.5">
                                   {getStatusIcon(subtask.status)}
@@ -319,11 +315,6 @@ export default function CourseDetailPage() {
                                     <div className="flex-1">
                                       <h4 className="text-sm font-medium text-gray-900 dark:text-white">
                                         {subtask.title}
-                                        {subtask.is_blocking && (
-                                          <Badge className="ml-2 text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300">
-                                            Blocking
-                                          </Badge>
-                                        )}
                                       </h4>
                                       <div className="flex items-center space-x-4 mt-1">
                                         <Badge className={`text-xs ${getStatusColor(subtask.status)}`}>

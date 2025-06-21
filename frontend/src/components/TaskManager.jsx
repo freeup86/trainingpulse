@@ -265,11 +265,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
             return (
               <div 
                 key={`${task.id}-${index}`}
-                className={`border rounded-lg p-4 space-y-3 ${
-                  task.isBlocking 
-                    ? 'border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-900/10' 
-                    : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
-                }`}
+                className="border rounded-lg p-4 space-y-3 border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
               >
                 {/* Task Header */}
                 <div className="flex items-start space-x-3">
@@ -324,19 +320,6 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
                         />
                       </div>
 
-                      {/* Blocking Checkbox */}
-                      <div className="flex items-center pt-5">
-                        <input
-                          type="checkbox"
-                          id={`blocking-${task.id}-${index}`}
-                          checked={task.isBlocking}
-                          onChange={(e) => updateTask(index, 'isBlocking', e.target.checked)}
-                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                        />
-                        <label htmlFor={`blocking-${task.id}-${index}`} className="ml-2 text-sm text-gray-700 dark:text-gray-300">
-                          Blocking task
-                        </label>
-                      </div>
                     </div>
 
                     {/* Status Badge */}
@@ -344,12 +327,6 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(task.status)}`}>
                         {task.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                       </span>
-                      {task.isBlocking && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300">
-                          <AlertTriangle className="h-3 w-3 mr-1" />
-                          Blocking
-                        </span>
-                      )}
                     </div>
                   </div>
 
