@@ -485,18 +485,21 @@ function CoursesPage() {
 function CourseSubtasks({ courseId }) {
   const queryClient = useQueryClient();
   const [editingTaskId, setEditingTaskId] = useState(null);
+  const [tempStatus, setTempStatus] = useState({});
 
   // Close editing when clicking outside or pressing Escape
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         setEditingTaskId(null);
+        setTempStatus({});
       }
     };
 
     const handleClickOutside = (e) => {
       if (editingTaskId && !e.target.closest('.subtask-status-select')) {
         setEditingTaskId(null);
+        setTempStatus({});
       }
     };
 
@@ -518,13 +521,24 @@ function CourseSubtasks({ courseId }) {
   const updateSubtaskMutation = useMutation({
     mutationFn: ({ subtaskId, updateData }) => 
       courses.updateSubtask(courseId, subtaskId, updateData),
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries(['course', courseId]);
       queryClient.invalidateQueries(['courses']);
       setEditingTaskId(null);
+      setTempStatus(prev => {
+        const newStatus = { ...prev };
+        delete newStatus[variables.subtaskId];
+        return newStatus;
+      });
       toast.success('Subtask status updated successfully');
     },
-    onError: (error) => {
+    onError: (error, variables) => {
+      // Revert temp status on error
+      setTempStatus(prev => {
+        const newStatus = { ...prev };
+        delete newStatus[variables.subtaskId];
+        return newStatus;
+      });
       toast.error(error.response?.data?.message || 'Failed to update subtask status');
     }
   });
@@ -536,6 +550,12 @@ function CourseSubtasks({ courseId }) {
       setEditingTaskId(null);
       return;
     }
+
+    // Set temporary status for immediate UI feedback
+    setTempStatus(prev => ({
+      ...prev,
+      [subtaskId]: newStatus
+    }));
 
     updateSubtaskMutation.mutate({
       subtaskId,
@@ -581,15 +601,16 @@ function CourseSubtasks({ courseId }) {
           <span>Subtasks ({subtasks.length})</span>
         </div>
         {subtasks.map((task, index) => {
-          const currentStatus = statusOptions.find(opt => opt.value === task.status) || statusOptions[0];
+          const taskId = task.id || `temp-${index}`;
+          const currentTaskStatus = tempStatus[taskId] || task.status;
+          const currentStatus = statusOptions.find(opt => opt.value === currentTaskStatus) || statusOptions[0];
           const StatusIcon = {
             'pending': Circle,
             'in_progress': Clock,
             'completed': CheckCircle,
             'on_hold': Pause
-          }[task.status] || Circle;
+          }[currentTaskStatus] || Circle;
 
-          const taskId = task.id || `temp-${index}`;
           const isEditing = editingTaskId === taskId;
           const isUpdating = updateSubtaskMutation.isLoading && updateSubtaskMutation.variables?.subtaskId === taskId;
           const canEdit = !!task.id; // Only allow editing if subtask has a real ID
@@ -607,7 +628,7 @@ function CourseSubtasks({ courseId }) {
                     <span className="text-sm text-gray-900 dark:text-white">{task.title}</span>
                     {isEditing ? (
                       <select
-                        value={task.status}
+                        value={currentTaskStatus}
                         onChange={(e) => {
                           e.stopPropagation();
                           handleStatusUpdate(taskId, e.target.value);
@@ -628,6 +649,11 @@ function CourseSubtasks({ courseId }) {
                         onClick={(e) => {
                           e.stopPropagation();
                           setEditingTaskId(taskId);
+                          // Initialize temp status with current status when starting edit
+                          setTempStatus(prev => ({
+                            ...prev,
+                            [taskId]: currentTaskStatus
+                          }));
                         }}
                         className={`text-xs px-2 py-1 rounded border border-dashed border-gray-300 dark:border-gray-600 hover:border-solid hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 transition-all cursor-pointer ${currentStatus.color} font-medium group inline-flex`}
                         title="Click to change status"
