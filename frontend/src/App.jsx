@@ -21,6 +21,9 @@ import EditCoursePage from './pages/EditCoursePage';
 import CreateTeamPage from './pages/CreateTeamPage';
 import EditTeamPage from './pages/EditTeamPage';
 import WorkflowCreatePage from './pages/WorkflowCreatePage';
+import WorkflowCreatePageSimple from './pages/WorkflowCreatePageSimple';
+import WorkflowCreatePageDebug from './pages/WorkflowCreatePageDebug';
+import TestWorkflowPage from './pages/TestWorkflowPage';
 import TestPage from './pages/TestPage';
 import MinimalPage from './pages/MinimalPage';
 
@@ -114,6 +117,7 @@ function App() {
                 <Route path="workflows" element={<WorkflowsPage />} />
                 <Route path="workflows/create" element={<WorkflowCreatePage />} />
                 <Route path="workflows/:id/edit" element={<WorkflowCreatePage />} />
+                <Route path="workflows/test" element={<TestWorkflowPage />} />
                 <Route path="bulk" element={<BulkOperationsPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
