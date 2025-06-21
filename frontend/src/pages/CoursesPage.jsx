@@ -576,14 +576,9 @@ function CourseSubtasks({ courseId }) {
   return (
     <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
       <div className="space-y-2">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300">
-            <ListTodo className="h-4 w-4 mr-2" />
-            <span>Subtasks ({subtasks.length})</span>
-          </div>
-          <span className="text-xs text-gray-500 dark:text-gray-400 italic">
-            Click status to update
-          </span>
+        <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <ListTodo className="h-4 w-4 mr-2" />
+          <span>Subtasks ({subtasks.length})</span>
         </div>
         {subtasks.map((task, index) => {
           const currentStatus = statusOptions.find(opt => opt.value === task.status) || statusOptions[0];
