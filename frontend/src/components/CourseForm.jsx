@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { ArrowLeft, Save, Calendar, Clock, Users, AlertTriangle, Trash2, ListTodo } from 'lucide-react';
-import { courses, users, teams, workflows } from '../lib/api';
+import { courses, users, teams, statuses } from '../lib/api';
 import TaskManager from './TaskManager';
 
 const COURSE_TYPES = [
@@ -19,6 +19,33 @@ const PRIORITIES = [
   { value: 'critical', label: 'Critical', color: 'text-red-600' }
 ];
 
+
+// Mapping function to derive status from workflow state
+const getStatusFromWorkflow = (workflowState) => {
+  switch (workflowState) {
+    case 'published':
+      return 'active';
+    case 'archived':
+      return 'completed';
+    case 'on_hold':
+      return 'on_hold';
+    case 'draft':
+    case 'planning':
+      return 'inactive';
+    case 'in_progress':
+    case 'content_development':
+    case 'review':
+    case 'sme_review':
+    case 'instructional_review':
+    case 'legal_review':
+    case 'compliance_review':
+    case 'final_approval':
+      return 'active';
+    default:
+      return 'inactive';
+  }
+};
+
 export default function CourseForm({ courseId = null }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -30,11 +57,11 @@ export default function CourseForm({ courseId = null }) {
     description: '',
     type: 'standard',
     priority: 'medium',
+    status: 'inactive',
     startDate: '',
     dueDate: '',
     estimatedHours: '',
-    estimatedDailyHours: '',
-    workflowTemplateId: ''
+    estimatedDailyHours: ''
   });
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -62,43 +89,35 @@ export default function CourseForm({ courseId = null }) {
     queryFn: () => teams.getAll()
   });
 
-  // Fetch workflow templates
-  const { data: workflowTemplatesData } = useQuery({
-    queryKey: ['workflow-templates'],
+  // Fetch statuses
+  const { data: statusesData } = useQuery({
+    queryKey: ['statuses'],
     queryFn: async () => {
-      const response = await workflows.getTemplates();
-      return response.data?.data || response.data || [];
+      const response = await statuses.getAll();
+      return response.data;
     }
   });
+
 
   // Populate form when editing
   useEffect(() => {
     if (courseData) {
       const course = courseData;
+      
       setFormData({
         title: course.title || '',
         description: course.description || '',
         type: course.type || 'standard',
         priority: course.priority || 'medium',
+        status: course.status || 'inactive',
         startDate: course.start_date ? course.start_date.split('T')[0] : '',
         dueDate: course.due_date ? course.due_date.split('T')[0] : '',
         estimatedHours: course.estimated_hours || '',
-        estimatedDailyHours: course.estimated_daily_hours || '',
-        workflowTemplateId: course.workflow_template_id || ''
+        estimatedDailyHours: course.estimated_daily_hours || ''
       });
     }
   }, [courseData]);
 
-  // Set default workflow template for new courses
-  useEffect(() => {
-    if (!isEditing && Array.isArray(workflowTemplatesData) && workflowTemplatesData.length > 0 && !formData.workflowTemplateId) {
-      // Default to the first active template (usually "Standard Course Development")
-      const defaultTemplate = workflowTemplatesData.find(t => t.is_active) || workflowTemplatesData[0];
-      if (defaultTemplate) {
-        setFormData(prev => ({ ...prev, workflowTemplateId: defaultTemplate.id.toString() }));
-      }
-    }
-  }, [isEditing, workflowTemplatesData, formData.workflowTemplateId]);
 
   // Create course mutation
   const createMutation = useMutation({
@@ -181,11 +200,6 @@ export default function CourseForm({ courseId = null }) {
       return;
     }
 
-    // Workflow template is required for new courses
-    if (!isEditing && !formData.workflowTemplateId) {
-      toast.error('Workflow template is required');
-      return;
-    }
 
     if (formData.dueDate && formData.startDate && new Date(formData.dueDate) < new Date(formData.startDate)) {
       toast.error('Due date cannot be earlier than start date');
@@ -197,6 +211,7 @@ export default function CourseForm({ courseId = null }) {
       description: formData.description.trim(),
       type: formData.type,
       priority: formData.priority,
+      status: formData.status,
       dueDate: formData.dueDate, // Required for creation
     };
 
@@ -219,8 +234,8 @@ export default function CourseForm({ courseId = null }) {
       }
       updateMutation.mutate(editData);
     } else {
-      // For creating, we need a workflow template ID and dueDate is required
-      const createData = { ...submitData, workflowTemplateId: parseInt(formData.workflowTemplateId) };
+      // For creating, dueDate is required
+      const createData = { ...submitData };
       
       // Get tasks data from TaskManager if available
       if (taskManagerRef.current) {
@@ -296,8 +311,8 @@ export default function CourseForm({ courseId = null }) {
                 />
               </div>
 
-              {/* Type and Priority */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Type, Priority, and Status */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
                   <label htmlFor="type" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Course Type
@@ -333,35 +348,26 @@ export default function CourseForm({ courseId = null }) {
                     ))}
                   </select>
                 </div>
-              </div>
 
-              {/* Workflow Template */}
-              {!isEditing && (
                 <div>
-                  <label htmlFor="workflowTemplateId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Workflow Template *
+                  <label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Status
                   </label>
                   <select
-                    id="workflowTemplateId"
-                    value={formData.workflowTemplateId}
-                    onChange={(e) => handleInputChange('workflowTemplateId', e.target.value)}
+                    id="status"
+                    value={formData.status}
+                    onChange={(e) => handleInputChange('status', e.target.value)}
                     className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                    required
                   >
-                    <option value="">Select a workflow template</option>
-                    {Array.isArray(workflowTemplatesData) && workflowTemplatesData.map(template => (
-                      <option key={template.id} value={template.id}>
-                        {template.name}
+                    {(statusesData?.data || statusesData || []).map(status => (
+                      <option key={status.value} value={status.value}>
+                        {status.label}
                       </option>
                     ))}
                   </select>
-                  {Array.isArray(workflowTemplatesData) && formData.workflowTemplateId && (
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      {workflowTemplatesData.find(t => t.id.toString() === formData.workflowTemplateId)?.description}
-                    </p>
-                  )}
                 </div>
-              )}
+              </div>
+
             </div>
           </div>
 

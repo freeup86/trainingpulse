@@ -38,7 +38,7 @@ function NotificationsPage() {
   const { data: notificationsData, isLoading, error } = useQuery({
     queryKey: ['notifications', filter],
     queryFn: () => notifications.getAll({
-      read: filter === 'read' ? true : filter === 'unread' ? false : undefined,
+      unreadOnly: filter === 'unread' ? true : false,
       limit: 100
     })
   });

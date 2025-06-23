@@ -1,6 +1,7 @@
 const express = require('express');
 const userController = require('../controllers/userController');
 const { authorize } = require('../middleware/authenticate');
+const { authorizePermission } = require('../middleware/authorizePermission');
 
 const router = express.Router();
 
@@ -9,11 +10,11 @@ router.get('/current', userController.getCurrentUser);
 router.put('/current', userController.updateUser);
 
 // User management endpoints
-router.get('/', userController.getUsers);
-router.get('/:id', userController.getUserById);
-router.post('/', authorize(['admin']), userController.createUser);
-router.put('/:id', authorize(['admin']), userController.updateUser);
-router.delete('/:id', authorize(['admin']), userController.deleteUser);
+router.get('/', authorizePermission('users.view'), userController.getUsers);
+router.get('/:id', authorizePermission('users.view'), userController.getUserById);
+router.post('/', authorizePermission('users.create'), userController.createUser);
+router.put('/:id', authorizePermission('users.update'), userController.updateUser);
+router.delete('/:id', authorizePermission('users.delete'), userController.deleteUser);
 
 // User capacity and workload
 router.put('/:id/capacity', userController.updateCapacity);

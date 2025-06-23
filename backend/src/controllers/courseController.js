@@ -2,6 +2,7 @@ const Joi = require('joi');
 const { query, transaction, buildWhereClause, buildPaginationClause, buildOrderClause } = require('../config/database');
 const StatusAggregator = require('../services/StatusAggregator');
 const SubtaskService = require('../services/SubtaskService');
+const NotificationService = require('../services/NotificationService');
 const { asyncHandler, ValidationError, NotFoundError, AuthorizationError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -63,6 +64,7 @@ class CourseController {
   constructor() {
     this.statusAggregator = new StatusAggregator();
     this.subtaskService = new SubtaskService();
+    this.notificationService = new NotificationService();
   }
 
   /**
@@ -330,6 +332,22 @@ class CourseController {
       forceUpdate: true,
       triggeredBy: req.user.id 
     });
+
+    // Create notifications for assigned users
+    for (const assignment of assignments) {
+      if (assignment.userId !== req.user.id) { // Don't notify the creator
+        await this.notificationService.createNotification({
+          userId: assignment.userId,
+          type: 'course_assignment',
+          priority: 'normal',
+          title: `New Course Assignment: ${title}`,
+          message: `You have been assigned to the course "${title}" as ${assignment.role}. Due: ${new Date(dueDate).toLocaleDateString()}`,
+          relatedEntityType: 'course',
+          relatedEntityId: course.id,
+          fromUserId: req.user.id
+        });
+      }
+    }
 
     logger.info('Course created successfully', {
       courseId: course.id,

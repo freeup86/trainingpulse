@@ -1,24 +1,31 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
+// We'll set the baseURL dynamically in the interceptor
 const API_VERSION = import.meta.env.VITE_API_VERSION || 'v1';
 
-// Create axios instance
+// Create axios instance with dynamic baseURL
 const api = axios.create({
-  baseURL: `${API_BASE_URL}/api/${API_VERSION}`,
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add auth token and dynamic baseURL
 api.interceptors.request.use(
   (config) => {
+    // Dynamically set baseURL for each request
+    const { protocol, hostname } = window.location;
+    // Force dynamic URL - ignore env variable for now
+    const dynamicBaseUrl = `${protocol}//${hostname}:3001`;
+    config.baseURL = `${dynamicBaseUrl}/api/${API_VERSION}`;
+    
+    // Add auth token
     const token = localStorage.getItem('accessToken');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
     return config;
   },
   (error) => {
@@ -332,6 +339,71 @@ export const settings = {
   
   set: (key, value) =>
     api.put(`/settings/${key}`, { value }),
+};
+
+export const statuses = {
+  getAll: () =>
+    api.get('/statuses'),
+  
+  create: (statusData) =>
+    api.post('/statuses', statusData),
+  
+  update: (id, statusData) =>
+    api.put(`/statuses/${id}`, statusData),
+  
+  delete: (id) =>
+    api.delete(`/statuses/${id}`),
+  
+  getById: (id) =>
+    api.get(`/statuses/${id}`),
+};
+
+export const roles = {
+  getAll: () =>
+    api.get('/roles'),
+  
+  getById: (id) =>
+    api.get(`/roles/${id}`),
+  
+  create: (roleData) =>
+    api.post('/roles', roleData),
+  
+  update: (id, roleData) =>
+    api.put(`/roles/${id}`, roleData),
+  
+  delete: (id) =>
+    api.delete(`/roles/${id}`),
+};
+
+export const permissions = {
+  getAll: () =>
+    api.get('/permissions'),
+  
+  getById: (id) =>
+    api.get(`/permissions/${id}`),
+  
+  getGrouped: () =>
+    api.get('/permissions/grouped'),
+  
+  getCategories: () =>
+    api.get('/permissions/categories'),
+  
+  create: (permissionData) =>
+    api.post('/permissions', permissionData),
+  
+  update: (id, permissionData) =>
+    api.put(`/permissions/${id}`, permissionData),
+  
+  delete: (id) =>
+    api.delete(`/permissions/${id}`),
+};
+
+export const userPermissions = {
+  getCurrent: () =>
+    api.get('/user-permissions'),
+  
+  getCurrentRole: () =>
+    api.get('/user-permissions/role'),
 };
 
 export default api;

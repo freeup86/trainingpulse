@@ -25,6 +25,10 @@ const userRoutes = require('./routes/userRoutes');
 const teamRoutes = require('./routes/teams');
 const workflowRoutes = require('./routes/workflowRoutes');
 const settingsRoutes = require('./routes/settings');
+const statusRoutes = require('./routes/statusRoutes');
+const roleRoutes = require('./routes/roleRoutes');
+const permissionRoutes = require('./routes/permissionRoutes');
+const userPermissionRoutes = require('./routes/userPermissionRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -47,13 +51,27 @@ app.use(helmet({
   }
 }));
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+// Manual CORS implementation for better control
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  console.log(`CORS request from origin: ${origin} to ${req.method} ${req.path}`);
+  
+  // Allow all origins in development
+  if (process.env.NODE_ENV === 'development' && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return res.sendStatus(204);
+  }
+  
+  next();
+});
 
 // General middleware
 app.use(compression());
@@ -118,6 +136,10 @@ app.use(`/api/${API_VERSION}/analytics`, authenticate, analyticsRoutes);
 app.use(`/api/${API_VERSION}/bulk`, authenticate, bulkLimiter, bulkRoutes);
 app.use(`/api/${API_VERSION}/notifications`, authenticate, notificationRoutes);
 app.use(`/api/${API_VERSION}/settings`, authenticate, settingsRoutes);
+app.use(`/api/${API_VERSION}/statuses`, authenticate, statusRoutes);
+app.use(`/api/${API_VERSION}/roles`, authenticate, roleRoutes);
+app.use(`/api/${API_VERSION}/permissions`, authenticate, permissionRoutes);
+app.use(`/api/${API_VERSION}/user-permissions`, authenticate, userPermissionRoutes);
 
 // API documentation endpoint
 app.get(`/api/${API_VERSION}`, (req, res) => {

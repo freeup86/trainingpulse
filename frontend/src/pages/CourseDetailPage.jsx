@@ -18,15 +18,51 @@ import {
   ListTodo,
   PlayCircle,
   Trash2,
-  Plus
+  Plus,
+  X
 } from 'lucide-react';
-import { courses } from '../lib/api';
+import { courses, statuses } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import TaskManager from '../components/TaskManager';
 import WorkflowMapModal from '../components/WorkflowMapModal';
+
+// Independent status definitions (separate from workflow)
+const COURSE_STATUSES = {
+  'active': { icon: CheckCircle, label: 'Active', color: 'text-green-500 dark:text-green-400' },
+  'inactive': { icon: Circle, label: 'Inactive', color: 'text-gray-500 dark:text-gray-400' },
+  'on_hold': { icon: Pause, label: 'On Hold', color: 'text-yellow-500 dark:text-yellow-400' },
+  'cancelled': { icon: Tag, label: 'Cancelled', color: 'text-red-500 dark:text-red-400' },
+  'completed': { icon: CheckCircle, label: 'Completed', color: 'text-blue-500 dark:text-blue-400' }
+};
+
+// Mapping function to derive status from workflow state
+const getStatusFromWorkflow = (workflowState) => {
+  switch (workflowState) {
+    case 'published':
+      return 'active';
+    case 'archived':
+      return 'completed';
+    case 'on_hold':
+      return 'on_hold';
+    case 'draft':
+    case 'planning':
+      return 'inactive';
+    case 'in_progress':
+    case 'content_development':
+    case 'review':
+    case 'sme_review':
+    case 'instructional_review':
+    case 'legal_review':
+    case 'compliance_review':
+    case 'final_approval':
+      return 'active';
+    default:
+      return 'inactive';
+  }
+};
 
 const WORKFLOW_STATES = {
   'draft': { icon: Circle, label: 'Draft', color: 'text-gray-500' },
@@ -74,6 +110,15 @@ export default function CourseDetailPage() {
     queryKey: ['course', id],
     queryFn: () => courses.getById(id),
     enabled: !!id
+  });
+
+  // Fetch statuses
+  const { data: statusesData } = useQuery({
+    queryKey: ['statuses'],
+    queryFn: async () => {
+      const response = await statuses.getAll();
+      return response.data;
+    }
   });
 
   // Delete course mutation
@@ -183,8 +228,21 @@ export default function CourseDetailPage() {
     );
   }
 
-  const workflowInfo = WORKFLOW_STATES[course.workflowState || course.workflow_state] || WORKFLOW_STATES['draft'];
-  const WorkflowIcon = workflowInfo.icon;
+  // Use the course's actual status field from the database
+  const courseStatus = course.status || 'inactive';
+  
+  // Get status info from fetched statuses or fallback to hardcoded
+  const statusesList = statusesData?.data || statusesData || [];
+  const statusInfo = statusesList.find(s => s.value === courseStatus) || 
+                    COURSE_STATUSES[courseStatus] || 
+                    COURSE_STATUSES['inactive'];
+  
+  const StatusIcon = statusInfo.icon === 'CheckCircle' ? CheckCircle :
+                    statusInfo.icon === 'Circle' ? Circle :
+                    statusInfo.icon === 'Pause' ? Pause :
+                    statusInfo.icon === 'X' ? X :
+                    statusInfo.icon === 'AlertTriangle' ? AlertTriangle :
+                    Circle;
 
   return (
     <div className="p-6 space-y-6">
@@ -436,77 +494,15 @@ export default function CourseDetailPage() {
             <CardContent className="space-y-4">
               <div>
                 <div className="flex items-center space-x-2 mb-2">
-                  <WorkflowIcon className={`h-4 w-4 ${workflowInfo.color}`} />
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">Workflow Step</span>
+                  <StatusIcon className={`h-4 w-4 ${statusInfo.color}`} />
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">Status</span>
                 </div>
-                <button
-                  onClick={() => setShowWorkflowMap(true)}
-                  className="inline-flex items-center group"
-                >
-                  <Badge className={`${getStatusColor(course.workflowState)} hover:shadow-md hover:scale-105 transition-all duration-200 cursor-pointer group-hover:ring-2 group-hover:ring-blue-300 group-hover:ring-offset-1 flex items-center space-x-1`}>
-                    <span>{workflowInfo.label}</span>
-                    <svg className="w-3 h-3 ml-1 opacity-60 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                    </svg>
-                  </Badge>
-                </button>
-                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 font-medium">
-                  📍 Click to view workflow map
-                </p>
+                <Badge className={statusInfo.color}>
+                  {statusInfo.label}
+                </Badge>
               </div>
 
-              {/* Workflow Transition */}
-              {(() => {
-                const currentState = course.workflowState || course.workflow_state || 'draft';
-                const nextStates = WORKFLOW_PROGRESSION[currentState] || [];
-                
-                if (nextStates.length > 0 && (user?.role === 'admin' || user?.role === 'manager')) {
-                  return (
-                    <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">Advance Workflow</span>
-                      </div>
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            handleWorkflowTransition(e.target.value);
-                            e.target.value = ""; // Reset select
-                          }
-                        }}
-                        className="w-full text-sm px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        disabled={workflowTransitionMutation.isLoading}
-                      >
-                        <option value="">Choose next step →</option>
-                        {nextStates.map(state => (
-                          <option key={state} value={state}>
-                            {WORKFLOW_STATES[state]?.label || state}
-                          </option>
-                        ))}
-                      </select>
-                      {workflowTransitionMutation.isLoading && (
-                        <div className="flex items-center mt-2 text-sm text-blue-600 dark:text-blue-400">
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                          Updating workflow...
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-                return null;
-              })()}
 
-              {course.status && (
-                <div>
-                  <div className="flex items-center space-x-2 mb-2">
-                    <Tag className="h-4 w-4 text-gray-500" />
-                    <span className="text-sm font-medium text-gray-900 dark:text-white">Status</span>
-                  </div>
-                  <Badge className={getStatusColor(course.status)}>
-                    {course.status}
-                  </Badge>
-                </div>
-              )}
             </CardContent>
           </Card>
 

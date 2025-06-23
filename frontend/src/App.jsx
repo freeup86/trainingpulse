@@ -26,6 +26,7 @@ import WorkflowCreatePageDebug from './pages/WorkflowCreatePageDebug';
 import TestWorkflowPage from './pages/TestWorkflowPage';
 import TestPage from './pages/TestPage';
 import MinimalPage from './pages/MinimalPage';
+import AdminPage from './pages/AdminPage';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -120,6 +121,7 @@ function App() {
                 <Route path="workflows/test" element={<TestWorkflowPage />} />
                 <Route path="bulk" element={<BulkOperationsPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
+                <Route path="admin" element={<AdminPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="profile" element={<ProfilePage />} />
                 <Route path="test" element={<TestPage />} />

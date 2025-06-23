@@ -61,25 +61,6 @@ const getStatusFromWorkflow = (workflowState) => {
   }
 };
 
-// Function to get course status information
-const getCourseStatus = (course, statusesData = null) => {
-  const courseStatus = course.status || 'inactive';
-  const statusesList = statusesData?.data || statusesData || [];
-  const statusInfo = statusesList.find(s => s.value === courseStatus) || 
-                    COURSE_STATUSES[courseStatus] || 
-                    COURSE_STATUSES['inactive'];
-  
-  return {
-    ...statusInfo,
-    icon: statusInfo.icon === 'CheckCircle' ? CheckCircle :
-          statusInfo.icon === 'Circle' ? Circle :
-          statusInfo.icon === 'Pause' ? Pause :
-          statusInfo.icon === 'X' ? X :
-          statusInfo.icon === 'AlertTriangle' ? AlertTriangle :
-          Circle
-  };
-};
-
 const WORKFLOW_STATES = {
   'draft': { icon: Circle, label: 'Draft', color: 'text-gray-500 dark:text-gray-400' },
   'planning': { icon: Circle, label: 'Planning', color: 'text-gray-500 dark:text-gray-400' },
@@ -130,12 +111,7 @@ function CoursesPage() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [showCourseModal, setShowCourseModal] = useState(false);
   const [expandedCourses, setExpandedCourses] = useState(new Set());
-  const [groupBy, setGroupBy] = useState(() => {
-    // Initialize from localStorage, then check URL params
-    const saved = localStorage.getItem('coursesGroupBy');
-    return saved || '';
-  }); // '' for no grouping, 'status' for grouping by status
-  const [editingStatus, setEditingStatus] = useState(null); // courseId of course being edited
+  const [groupBy, setGroupBy] = useState(''); // '' for no grouping, 'status' for grouping by status
   const [filters, setFilters] = useState({
     priority: '',
     type: '',
@@ -149,7 +125,6 @@ function CoursesPage() {
     const urlType = searchParams.get('type') || '';
     const urlStatus = searchParams.get('status') || '';
     const urlFilter = searchParams.get('filter') || '';
-    const urlGroupBy = searchParams.get('groupBy') || '';
 
     // Handle special filter parameters
     let computedFilters = {
@@ -169,33 +144,7 @@ function CoursesPage() {
 
     setSearchTerm(urlSearch);
     setFilters(computedFilters);
-    
-    // Only update groupBy from URL if URL has a value, or if we're explicitly clearing it
-    // Don't let empty URL params override localStorage
-    if (urlGroupBy && urlGroupBy !== groupBy) {
-      // URL has a value and it's different from current state
-      setGroupBy(urlGroupBy);
-      localStorage.setItem('coursesGroupBy', urlGroupBy);
-    } else if (!urlGroupBy && groupBy) {
-      // URL is empty but we have a groupBy state - restore URL from localStorage/state
-      const params = new URLSearchParams(searchParams);
-      params.set('groupBy', groupBy);
-      setSearchParams(params, { replace: true });
-    }
   }, [searchParams]);
-
-  // Ensure URL reflects localStorage value on mount
-  useEffect(() => {
-    const savedGroupBy = localStorage.getItem('coursesGroupBy') || '';
-    const urlGroupBy = searchParams.get('groupBy') || '';
-    
-    // If localStorage has a value but URL doesn't, update URL
-    if (savedGroupBy && !urlGroupBy) {
-      const params = new URLSearchParams(searchParams);
-      params.set('groupBy', savedGroupBy);
-      setSearchParams(params, { replace: true });
-    }
-  }, []); // Only run on mount
 
   const { data: coursesData, isLoading, error } = useQuery({
     queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { 
@@ -253,57 +202,6 @@ function CoursesPage() {
     }
   });
 
-  // Mutation for updating course status
-  const updateCourseStatusMutation = useMutation({
-    mutationFn: ({ courseId, status }) => 
-      courses.update(courseId, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['courses']);
-      setEditingStatus(null);
-      toast.success('Course status updated successfully');
-    },
-    onError: (error) => {
-      console.error('Status update error:', error);
-      setEditingStatus(null);
-      
-      let errorMessage = 'Failed to update course status';
-      if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.response?.data?.error) {
-        errorMessage = error.response.data.error;
-      }
-      
-      toast.error(errorMessage);
-    }
-  });
-
-  const handleStatusUpdate = (courseId, newStatus) => {
-    updateCourseStatusMutation.mutate({ courseId, status: newStatus });
-  };
-
-  // Close status editing when clicking outside or pressing Escape
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setEditingStatus(null);
-      }
-    };
-
-    const handleClickOutside = (e) => {
-      if (editingStatus && !e.target.closest('.status-select-dropdown')) {
-        setEditingStatus(null);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('click', handleClickOutside);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('click', handleClickOutside);
-    };
-  }, [editingStatus]);
-
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({
       ...prev,
@@ -320,14 +218,8 @@ function CoursesPage() {
       active: ''
     });
     setSearchTerm('');
-    // Clear URL parameters but preserve groupBy
-    const params = new URLSearchParams(searchParams);
-    const currentGroupBy = params.get('groupBy');
-    params.clear();
-    if (currentGroupBy) {
-      params.set('groupBy', currentGroupBy);
-    }
-    setSearchParams(params);
+    // Clear URL parameters as well
+    setSearchParams({});
   };
 
   const toggleCourseExpansion = (courseId) => {
@@ -351,8 +243,11 @@ function CoursesPage() {
   };
 
   const openCourseModal = (course) => {
+    console.log('Opening course modal for:', course.title);
+    console.log('Course data:', course);
     setSelectedCourse(course);
     setShowCourseModal(true);
+    console.log('Modal state should be true now');
   };
 
   const closeCourseModal = () => {
@@ -360,6 +255,10 @@ function CoursesPage() {
     setShowCourseModal(false);
   };
 
+  // Debug useEffect to track state changes
+  useEffect(() => {
+    console.log('State changed - showCourseModal:', showCourseModal, 'selectedCourse:', selectedCourse?.title);
+  }, [showCourseModal, selectedCourse]);
 
   if (isLoading) {
     return (
@@ -448,25 +347,7 @@ function CoursesPage() {
       }
       groups[statusLabel].push(course);
     });
-    
-    // Sort groups by status order_index from database
-    const sortedGroups = {};
-    statusesList
-      .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
-      .forEach(status => {
-        if (groups[status.label]) {
-          sortedGroups[status.label] = groups[status.label];
-        }
-      });
-    
-    // Add any remaining groups that might not have been in the statusesList
-    Object.keys(groups).forEach(statusLabel => {
-      if (!sortedGroups[statusLabel]) {
-        sortedGroups[statusLabel] = groups[statusLabel];
-      }
-    });
-    
-    return sortedGroups;
+    return groups;
   })() : null;
 
   return (
@@ -574,22 +455,7 @@ function CoursesPage() {
           {/* Group by Status */}
           <div>
             <button
-              onClick={() => {
-                const newGroupBy = groupBy === 'status' ? '' : 'status';
-                setGroupBy(newGroupBy);
-                
-                // Save to localStorage
-                localStorage.setItem('coursesGroupBy', newGroupBy);
-                
-                // Update URL parameters
-                const params = new URLSearchParams(searchParams);
-                if (newGroupBy) {
-                  params.set('groupBy', newGroupBy);
-                } else {
-                  params.delete('groupBy');
-                }
-                setSearchParams(params);
-              }}
+              onClick={() => setGroupBy(groupBy === 'status' ? '' : 'status')}
               className={`w-full inline-flex items-center justify-center px-3 py-2 border shadow-sm text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
                 groupBy === 'status'
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30'
@@ -726,7 +592,7 @@ function CoursesPage() {
                       
                       return (
                         <React.Fragment key={course.id}>
-                          <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
+                          <tr className="hover:bg-gray-50 dark:hover:bg-gray-700">
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center">
                                 <button
@@ -763,45 +629,10 @@ function CoursesPage() {
 
                             {/* Status Column */}
                             <td className="px-6 py-4 whitespace-nowrap">
-                              {editingStatus === course.id ? (
-                                <div className="relative status-select-dropdown">
-                                  <select
-                                    value={course.status || 'predevelopment'}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      handleStatusUpdate(course.id, e.target.value);
-                                    }}
-                                    onBlur={() => setEditingStatus(null)}
-                                    autoFocus
-                                    className="text-sm px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    disabled={updateCourseStatusMutation.isLoading}
-                                  >
-                                    {(statusesData?.data || statusesData || []).map((status) => (
-                                      <option key={status.value} value={status.value}>
-                                        {status.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  {updateCourseStatusMutation.isLoading && (
-                                    <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
-                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div 
-                                  className="flex items-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 transition-colors"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingStatus(course.id);
-                                  }}
-                                  title="Click to change status"
-                                >
-                                  <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
-                                  <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
-                                  <Edit className="h-3 w-3 ml-1 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </div>
-                              )}
+                              <div className="flex items-center">
+                                <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
+                                <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
+                              </div>
                             </td>
 
                             {/* Progress Column */}
@@ -949,7 +780,7 @@ function CoursesPage() {
                   
                   return (
                     <React.Fragment key={course.id}>
-                      <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
+                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
                             <button
@@ -986,45 +817,10 @@ function CoursesPage() {
                         
                         {/* Status Column */}
                         <td className="px-6 py-4 whitespace-nowrap">
-                          {editingStatus === course.id ? (
-                            <div className="relative status-select-dropdown">
-                              <select
-                                value={course.status || 'predevelopment'}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  handleStatusUpdate(course.id, e.target.value);
-                                }}
-                                onBlur={() => setEditingStatus(null)}
-                                autoFocus
-                                className="text-sm px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                disabled={updateCourseStatusMutation.isLoading}
-                              >
-                                {(statusesData?.data || statusesData || []).map((status) => (
-                                  <option key={status.value} value={status.value}>
-                                    {status.label}
-                                  </option>
-                                ))}
-                              </select>
-                              {updateCourseStatusMutation.isLoading && (
-                                <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
-                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div 
-                              className="flex items-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingStatus(course.id);
-                              }}
-                              title="Click to change status"
-                            >
-                              <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
-                              <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
-                              <Edit className="h-3 w-3 ml-1 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </div>
-                          )}
+                          <div className="flex items-center">
+                            <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
+                            <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
+                          </div>
                         </td>
 
                         {/* Progress Column */}
@@ -1122,7 +918,7 @@ function CoursesPage() {
       )}
     </div>
 
-    {/* Course Details Modal */}
+    {/* Course Details Modal - Outside main container */}
     {showCourseModal && selectedCourse && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -1151,7 +947,7 @@ function CoursesPage() {
                 <div>
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</h3>
                   <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {getCourseStatus(selectedCourse, statusesData)?.label || 'Unknown'}
+                    {getCourseStatus(selectedCourse)?.label || 'Unknown'}
                   </p>
                 </div>
                 <div>
@@ -1427,6 +1223,213 @@ function CourseSubtasks({ courseId }) {
         })}
       </div>
     </div>
+
+    {/* Course Details Modal - Outside main container */}
+    {console.log('Modal render check - showCourseModal:', showCourseModal, 'selectedCourse:', selectedCourse)}
+    
+    {/* Test Modal - always shows if showCourseModal is true */}
+    {showCourseModal && (
+      <div className="fixed inset-0 bg-red-500 bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white p-6 rounded-lg">
+          <h2>TEST MODAL - Modal is working!</h2>
+          <p>Course: {selectedCourse?.title || 'No course selected'}</p>
+          <button onClick={closeCourseModal} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">
+            Close
+          </button>
+        </div>
+      </div>
+    )}
+    
+    {false && (showCourseModal && selectedCourse) && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                Course Details
+              </h2>
+              <button
+                onClick={closeCourseModal}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-6">
+              {/* Course Title */}
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                  {selectedCourse.title}
+                </h3>
+                {selectedCourse.description && (
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {selectedCourse.description}
+                  </p>
+                )}
+              </div>
+
+              {/* Course Info Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Status */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Status
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    {(() => {
+                      const courseStatus = selectedCourse.status || 'inactive';
+                      const statusesList = statusesData?.data || statusesData || [];
+                      const statusInfo = statusesList.find(s => s.value === courseStatus) || 
+                                        COURSE_STATUSES[courseStatus] || 
+                                        COURSE_STATUSES['inactive'];
+                      
+                      const StatusIcon = statusInfo.icon === 'CheckCircle' ? CheckCircle :
+                                        statusInfo.icon === 'Circle' ? Circle :
+                                        statusInfo.icon === 'Pause' ? Pause :
+                                        statusInfo.icon === 'X' ? X :
+                                        statusInfo.icon === 'AlertTriangle' ? AlertTriangle :
+                                        Circle;
+                      
+                      return (
+                        <>
+                          <StatusIcon className={`h-4 w-4 ${statusInfo.color}`} />
+                          <span className={`text-sm ${statusInfo.color}`}>
+                            {statusInfo.label}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Priority */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Priority
+                  </label>
+                  <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(selectedCourse.priority)}`}>
+                    {selectedCourse.priority || 'medium'}
+                  </span>
+                </div>
+
+                {/* Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Type
+                  </label>
+                  <span className="text-sm text-gray-900 dark:text-white">
+                    {selectedCourse.type || 'standard'}
+                  </span>
+                </div>
+
+                {/* Progress */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Progress
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full" 
+                        style={{ width: `${selectedCourse.completion_percentage || 0}%` }}
+                      ></div>
+                    </div>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      {selectedCourse.completion_percentage || 0}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dates */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {(selectedCourse.start_date || selectedCourse.startDate) && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Start Date
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <span className="text-sm text-gray-900 dark:text-white">
+                        {formatDate(selectedCourse.start_date || selectedCourse.startDate)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {(selectedCourse.due_date || selectedCourse.dueDate) && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Due Date
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <Calendar className="h-4 w-4 text-gray-500" />
+                      <span className="text-sm text-gray-900 dark:text-white">
+                        {formatDate(selectedCourse.due_date || selectedCourse.dueDate)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Estimated Hours */}
+              {(selectedCourse.estimated_hours || selectedCourse.estimated_daily_hours) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {selectedCourse.estimated_hours && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Estimated Hours
+                      </label>
+                      <div className="flex items-center space-x-2">
+                        <Clock className="h-4 w-4 text-gray-500" />
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {selectedCourse.estimated_hours} hours
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedCourse.estimated_daily_hours && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Daily Hours
+                      </label>
+                      <div className="flex items-center space-x-2">
+                        <Clock className="h-4 w-4 text-gray-500" />
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {selectedCourse.estimated_daily_hours} hours/day
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end space-x-3 p-6 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={closeCourseModal}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  navigate(`/courses/${selectedCourse.id}`);
+                  closeCourseModal();
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+              >
+                View Full Details
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

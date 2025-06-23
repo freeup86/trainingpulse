@@ -29,7 +29,7 @@ export function Header({ onMenuClick, user }) {
   // Fetch recent notifications for the header dropdown
   const { data: notificationsData } = useQuery({
     queryKey: ['notifications', 'recent'],
-    queryFn: () => notifications.getAll({ limit: 5, read: false }),
+    queryFn: () => notifications.getAll({ limit: 5, unreadOnly: true }),
     refetchInterval: 30000 // Refetch every 30 seconds
   });
 
