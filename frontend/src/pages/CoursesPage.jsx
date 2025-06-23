@@ -13,6 +13,7 @@ import {
   CheckCircle,
   Circle,
   Pause,
+  PlayCircle,
   ChevronDown,
   ChevronUp,
   ChevronRight,
@@ -114,10 +115,10 @@ const WORKFLOW_PROGRESSION = {
   'archived': [] // Terminal state
 };
 
-// Helper function to calculate progress based on subtask completion
+// Helper function to calculate progress based on phase completion
 const calculateProgress = (subtasks) => {
   if (!subtasks || subtasks.length === 0) return 0;
-  const completedCount = subtasks.filter(st => st.status === 'completed').length;
+  const completedCount = subtasks.filter(st => st.status === 'final').length;
   return Math.round((completedCount / subtasks.length) * 100);
 };
 
@@ -884,7 +885,7 @@ function CoursesPage() {
                             <tr className="bg-gray-50 dark:bg-gray-900">
                               <td colSpan="7" className="p-0">
                                 <div className="border-t border-gray-200 dark:border-gray-700">
-                                  <CourseSubtasks courseId={course.id} />
+                                  <CoursePhases courseId={course.id} />
                                 </div>
                               </td>
                             </tr>
@@ -1107,7 +1108,7 @@ function CoursesPage() {
                         <tr className="bg-gray-50 dark:bg-gray-900">
                           <td colSpan="7" className="p-0">
                             <div className="border-t border-gray-200 dark:border-gray-700">
-                              <CourseSubtasks courseId={course.id} />
+                              <CoursePhases courseId={course.id} />
                             </div>
                           </td>
                         </tr>
@@ -1202,8 +1203,8 @@ function CoursesPage() {
   );
 }
 
-// Subtasks component  
-function CourseSubtasks({ courseId }) {
+// Phases component  
+function CoursePhases({ courseId }) {
   const queryClient = useQueryClient();
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [tempStatus, setTempStatus] = useState({});
@@ -1219,7 +1220,7 @@ function CourseSubtasks({ courseId }) {
     };
 
     const handleClickOutside = (e) => {
-      if (editingTaskId && !e.target.closest('.subtask-status-select')) {
+      if (editingTaskId && !e.target.closest('.phase-status-select')) {
         setEditingTaskId(null);
         setTempStatus({});
       }
@@ -1252,7 +1253,7 @@ function CourseSubtasks({ courseId }) {
         delete newStatus[variables.subtaskId];
         return newStatus;
       });
-      toast.success('Subtask status updated successfully');
+      toast.success('Phase status updated successfully');
     },
     onError: (error, variables) => {
       // Revert temp status on error
@@ -1261,8 +1262,8 @@ function CourseSubtasks({ courseId }) {
         delete newStatus[variables.subtaskId];
         return newStatus;
       });
-      console.error('Subtask update error:', error.response?.data);
-      toast.error(error.response?.data?.message || error.response?.data?.error || 'Failed to update subtask status');
+      console.error('Phase update error:', error.response?.data);
+      toast.error(error.response?.data?.message || error.response?.data?.error || 'Failed to update phase status');
     }
   });
 
@@ -1270,9 +1271,9 @@ function CourseSubtasks({ courseId }) {
     // Convert to string to handle numeric IDs
     const subtaskIdStr = String(subtaskId);
     
-    // Don't update if it's a temporary ID (subtask without real ID)
+    // Don't update if it's a temporary ID (phase without real ID)
     if (subtaskIdStr.startsWith('temp-')) {
-      toast.error('Cannot update subtask status: subtask not properly saved');
+      toast.error('Cannot update phase status: phase not properly saved');
       setEditingTaskId(null);
       return;
     }
@@ -1284,7 +1285,7 @@ function CourseSubtasks({ courseId }) {
     });
     
     if (!currentTask) {
-      toast.error('Could not find subtask data');
+      toast.error('Could not find phase data');
       return;
     }
 
@@ -1315,17 +1316,16 @@ function CourseSubtasks({ courseId }) {
       <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
         <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
           <ListTodo className="h-4 w-4 mr-2" />
-          <span>No subtasks defined</span>
+          <span>No phases defined</span>
         </div>
       </div>
     );
   }
 
   const statusOptions = [
-    { value: 'pending', label: 'Pending', color: 'text-gray-500 dark:text-gray-400' },
-    { value: 'in_progress', label: 'In Progress', color: 'text-blue-500 dark:text-blue-400' },
-    { value: 'completed', label: 'Completed', color: 'text-green-500 dark:text-green-400' },
-    { value: 'on_hold', label: 'On Hold', color: 'text-yellow-500 dark:text-yellow-400' }
+    { value: 'alpha_review', label: 'Alpha Review', color: 'text-blue-500 dark:text-blue-400' },
+    { value: 'beta_review', label: 'Beta Review', color: 'text-yellow-500 dark:text-yellow-400' },
+    { value: 'final', label: 'Final (Gold)', color: 'text-green-500 dark:text-green-400' }
   ];
 
   return (
@@ -1333,7 +1333,7 @@ function CourseSubtasks({ courseId }) {
       <div className="space-y-2">
         <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           <ListTodo className="h-4 w-4 mr-2" />
-          <span>Subtasks ({subtasks.length})</span>
+          <span>Phases of Development ({subtasks.length})</span>
         </div>
         {subtasks.map((task, index) => {
           // Check for different possible ID field names
@@ -1341,11 +1341,10 @@ function CourseSubtasks({ courseId }) {
           const currentTaskStatus = tempStatus[taskId] || task.status;
           const currentStatus = statusOptions.find(opt => opt.value === currentTaskStatus) || statusOptions[0];
           const StatusIcon = {
-            'pending': Circle,
-            'in_progress': Clock,
-            'completed': CheckCircle,
-            'on_hold': Pause
-          }[currentTaskStatus] || Circle;
+            'alpha_review': PlayCircle,
+            'beta_review': AlertTriangle,
+            'final': CheckCircle
+          }[currentTaskStatus] || PlayCircle;
 
           const isEditing = editingTaskId === taskId;
           const isUpdating = updateSubtaskMutation.isLoading && updateSubtaskMutation.variables?.subtaskId === taskId;
@@ -1391,7 +1390,7 @@ function CourseSubtasks({ courseId }) {
                               setEditingTaskId(null);
                             }, 200);
                           }}
-                          className={`text-xs px-2 py-1 rounded border cursor-pointer font-medium appearance-none bg-transparent pr-6 ${
+                          className={`phase-status-select text-xs px-2 py-1 rounded border cursor-pointer font-medium appearance-none bg-transparent pr-6 ${
                             isEditing 
                               ? 'border-solid border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500' 
                               : `border-dashed border-gray-300 dark:border-gray-600 hover:border-solid hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 transition-all ${currentStatus.color}`

@@ -1,10 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
-import { ArrowLeft, Save, Calendar, Clock, Users, AlertTriangle, Trash2, ListTodo } from 'lucide-react';
+import { ArrowLeft, Save, Calendar, Clock, AlertTriangle, Trash2, Package, CheckCircle } from 'lucide-react';
 import { courses, users, teams, statuses } from '../lib/api';
-import TaskManager from './TaskManager';
+
+const MODALITIES = [
+  { value: 'WBT', label: 'WBT (Web-Based Training)' },
+  { value: 'ILT/VLT', label: 'ILT/VLT (Instructor-Led/Virtual-Led Training)' },
+  { value: 'Micro Learning', label: 'Micro Learning' },
+  { value: 'SIMS', label: 'SIMS (Simulations)' },
+  { value: 'DAP', label: 'DAP (Digital Adoption Platform)' }
+];
 
 const COURSE_TYPES = [
   { value: 'standard', label: 'Standard' },
@@ -19,85 +26,66 @@ const PRIORITIES = [
   { value: 'critical', label: 'Critical', color: 'text-red-600' }
 ];
 
-
-// Mapping function to derive status from workflow state
-const getStatusFromWorkflow = (workflowState) => {
-  switch (workflowState) {
-    case 'published':
-      return 'active';
-    case 'archived':
-      return 'completed';
-    case 'on_hold':
-      return 'on_hold';
-    case 'draft':
-    case 'planning':
-      return 'inactive';
-    case 'in_progress':
-    case 'content_development':
-    case 'review':
-    case 'sme_review':
-    case 'instructional_review':
-    case 'legal_review':
-    case 'compliance_review':
-    case 'final_approval':
-      return 'active';
-    default:
-      return 'inactive';
-  }
-};
-
 export default function CourseForm({ courseId = null }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isEditing = Boolean(courseId);
-  const taskManagerRef = useRef();
 
   const [formData, setFormData] = useState({
     title: '',
     description: '',
+    modality: '',
+    deliverables: [],
     type: 'standard',
     priority: 'medium',
-    status: 'inactive',
     startDate: '',
     dueDate: '',
     estimatedHours: '',
-    estimatedDailyHours: ''
+    estimatedDailyHours: '',
+    workflowTemplateId: 1 // Default workflow template
   });
 
+  const [modalityInfo, setModalityInfo] = useState(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-
 
   // Fetch course data if editing
   const { data: courseData } = useQuery({
     queryKey: ['course', courseId],
     queryFn: async () => {
       const response = await courses.getById(courseId);
-      return response.data.data; // Extract the actual course data from the response
+      return response.data.data;
     },
     enabled: isEditing
   });
 
-  // Fetch users for assignment
-  const { data: usersData } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => users.getAll({ limit: 100 })
-  });
-
-  // Fetch teams for context
-  const { data: teamsData } = useQuery({
-    queryKey: ['teams'],
-    queryFn: () => teams.getAll()
-  });
-
-  // Fetch statuses
-  const { data: statusesData } = useQuery({
-    queryKey: ['statuses'],
+  // Fetch all deliverables for WBT modality selection
+  const { data: deliverablesData } = useQuery({
+    queryKey: ['deliverables'],
     queryFn: async () => {
-      const response = await statuses.getAll();
-      return response.data;
+      const response = await courses.getDeliverables();
+      return response.data.data;
     }
   });
 
+  // Fetch modality information when modality changes
+  const { data: modalityData } = useQuery({
+    queryKey: ['modality-info', formData.modality],
+    queryFn: async () => {
+      const response = await courses.getModalityInfo(formData.modality);
+      return response.data.data;
+    },
+    enabled: Boolean(formData.modality && !isEditing),
+    onSuccess: (data) => {
+      setModalityInfo(data);
+      // For non-WBT modalities, auto-assign deliverables
+      if (formData.modality !== 'WBT') {
+        setFormData(prev => ({
+          ...prev,
+          deliverables: data.deliverables.map(d => d.id)
+        }));
+      }
+    }
+  });
 
   // Populate form when editing
   useEffect(() => {
@@ -107,23 +95,25 @@ export default function CourseForm({ courseId = null }) {
       setFormData({
         title: course.title || '',
         description: course.description || '',
+        modality: course.modality || '',
+        deliverables: course.deliverables?.map(d => d.id) || [],
         type: course.type || 'standard',
         priority: course.priority || 'medium',
-        status: course.status || 'inactive',
         startDate: course.start_date ? course.start_date.split('T')[0] : '',
         dueDate: course.due_date ? course.due_date.split('T')[0] : '',
         estimatedHours: course.estimated_hours || '',
-        estimatedDailyHours: course.estimated_daily_hours || ''
+        estimatedDailyHours: course.estimated_daily_hours || '',
+        workflowTemplateId: course.workflow_template_id || 1
       });
     }
   }, [courseData]);
 
-
   // Create course mutation
   const createMutation = useMutation({
     mutationFn: (courseData) => courses.create(courseData),
-    onSuccess: () => {
-      toast.success('Course created successfully!');
+    onSuccess: (response) => {
+      const tasksCreated = response.data.data.tasksCreated || 0;
+      toast.success(`Course created successfully with ${tasksCreated} auto-generated phases!`);
       queryClient.invalidateQueries(['courses']);
       navigate('/courses');
     },
@@ -146,7 +136,7 @@ export default function CourseForm({ courseId = null }) {
     }
   });
 
-  // Delete course mutation (only available when editing)
+  // Delete course mutation
   const deleteMutation = useMutation({
     mutationFn: () => courses.delete(courseId),
     onSuccess: () => {
@@ -166,6 +156,24 @@ export default function CourseForm({ courseId = null }) {
     }));
   };
 
+  const handleModalityChange = (modality) => {
+    setFormData(prev => ({
+      ...prev,
+      modality,
+      deliverables: [] // Reset deliverables when modality changes
+    }));
+    setModalityInfo(null);
+  };
+
+  const handleDeliverableToggle = (deliverableId) => {
+    setFormData(prev => ({
+      ...prev,
+      deliverables: prev.deliverables.includes(deliverableId)
+        ? prev.deliverables.filter(id => id !== deliverableId)
+        : [...prev.deliverables, deliverableId]
+    }));
+  };
+
   const handleDeleteClick = () => {
     setShowDeleteDialog(true);
   };
@@ -178,7 +186,6 @@ export default function CourseForm({ courseId = null }) {
   const handleDeleteCancel = () => {
     setShowDeleteDialog(false);
   };
-
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -194,12 +201,21 @@ export default function CourseForm({ courseId = null }) {
       return;
     }
 
-    // Due date is required for new courses
+    if (!formData.modality) {
+      toast.error('Course modality is required');
+      return;
+    }
+
+    // WBT must have at least one deliverable selected
+    if (formData.modality === 'WBT' && formData.deliverables.length === 0) {
+      toast.error('Please select at least one deliverable for WBT courses');
+      return;
+    }
+
     if (!isEditing && !formData.dueDate) {
       toast.error('Due date is required');
       return;
     }
-
 
     if (formData.dueDate && formData.startDate && new Date(formData.dueDate) < new Date(formData.startDate)) {
       toast.error('Due date cannot be earlier than start date');
@@ -209,11 +225,17 @@ export default function CourseForm({ courseId = null }) {
     const submitData = {
       title: formData.title.trim(),
       description: formData.description.trim(),
+      modality: formData.modality,
       type: formData.type,
       priority: formData.priority,
-      status: formData.status,
-      dueDate: formData.dueDate, // Required for creation
+      dueDate: formData.dueDate,
+      workflowTemplateId: formData.workflowTemplateId
     };
+
+    // Add deliverables for WBT, others are auto-assigned
+    if (formData.modality === 'WBT') {
+      submitData.deliverables = formData.deliverables;
+    }
 
     // Only add optional fields if they have values
     if (formData.startDate) {
@@ -227,29 +249,18 @@ export default function CourseForm({ courseId = null }) {
     }
 
     if (isEditing) {
-      // For editing, dueDate can be null
-      const editData = { ...submitData };
-      if (!editData.dueDate) {
-        editData.dueDate = null;
-      }
-      updateMutation.mutate(editData);
+      updateMutation.mutate(submitData);
     } else {
-      // For creating, dueDate is required
-      const createData = { ...submitData };
-      
-      // Get tasks data from TaskManager if available
-      if (taskManagerRef.current) {
-        const tasksData = taskManagerRef.current.getTasksData();
-        if (tasksData.length > 0) {
-          createData.tasks = tasksData;
-        }
-      }
-      
-      createMutation.mutate(createData);
+      createMutation.mutate(submitData);
     }
   };
 
   const isLoading = createMutation.isPending || updateMutation.isPending;
+
+  // Get WBT deliverable options
+  const wbtDeliverables = deliverablesData?.filter(d => 
+    ['Custom Content', 'Course Wrapper'].includes(d.name)
+  ) || [];
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -269,7 +280,7 @@ export default function CourseForm({ courseId = null }) {
             {isEditing ? 'Edit Course' : 'Create New Course'}
           </h1>
           <p className="mt-2 text-gray-600 dark:text-gray-300">
-            {isEditing ? 'Update course details and settings' : 'Create a new training course and configure its workflow'}
+            {isEditing ? 'Update course details and settings' : 'Create a new training course with auto-generated phases and deliverables'}
           </p>
         </div>
 
@@ -311,8 +322,35 @@ export default function CourseForm({ courseId = null }) {
                 />
               </div>
 
-              {/* Type, Priority, and Status */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Modality Selection */}
+              <div>
+                <label htmlFor="modality" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Course Modality *
+                </label>
+                <select
+                  id="modality"
+                  value={formData.modality}
+                  onChange={(e) => handleModalityChange(e.target.value)}
+                  className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  required
+                  disabled={isEditing}
+                >
+                  <option value="">Select a modality...</option>
+                  {MODALITIES.map(modality => (
+                    <option key={modality.value} value={modality.value}>
+                      {modality.label}
+                    </option>
+                  ))}
+                </select>
+                {isEditing && (
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Modality cannot be changed when editing an existing course
+                  </p>
+                )}
+              </div>
+
+              {/* Type, Priority grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label htmlFor="type" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Course Type
@@ -348,28 +386,109 @@ export default function CourseForm({ courseId = null }) {
                     ))}
                   </select>
                 </div>
+              </div>
+            </div>
+          </div>
 
-                <div>
-                  <label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Status
-                  </label>
-                  <select
-                    id="status"
-                    value={formData.status}
-                    onChange={(e) => handleInputChange('status', e.target.value)}
-                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+          {/* Deliverables Section - WBT Only */}
+          {formData.modality === 'WBT' && !isEditing && (
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-6 flex items-center">
+                <Package className="h-5 w-5 mr-2" />
+                Deliverables Selection
+              </h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Choose the deliverables for your WBT course:
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {wbtDeliverables.map(deliverable => (
+                  <div 
+                    key={deliverable.id}
+                    className={`relative border rounded-lg p-4 cursor-pointer transition-colors ${
+                      formData.deliverables.includes(deliverable.id)
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                        : 'border-gray-300 dark:border-gray-600 hover:border-gray-400'
+                    }`}
+                    onClick={() => handleDeliverableToggle(deliverable.id)}
                   >
-                    {(statusesData?.data || statusesData || []).map(status => (
-                      <option key={status.value} value={status.value}>
-                        {status.label}
-                      </option>
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={formData.deliverables.includes(deliverable.id)}
+                        onChange={() => handleDeliverableToggle(deliverable.id)}
+                        className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      />
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                          {deliverable.name}
+                        </h3>
+                        {deliverable.description && (
+                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            {deliverable.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Auto-Generated Content Preview */}
+          {modalityInfo && formData.modality && formData.modality !== 'WBT' && (
+            <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
+              <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-6 flex items-center">
+                <CheckCircle className="h-5 w-5 mr-2 text-green-500" />
+                Auto-Generated Content
+              </h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Auto-Assigned Deliverables */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-3">
+                    Deliverables (Auto-Assigned)
+                  </h3>
+                  <div className="space-y-2">
+                    {modalityInfo.deliverables.map(deliverable => (
+                      <div key={deliverable.id} className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
+                        {deliverable.name}
+                      </div>
                     ))}
-                  </select>
+                  </div>
+                </div>
+
+                {/* Auto-Created Tasks */}
+                <div>
+                  <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-3">
+                    Phases (Auto-Created)
+                  </h3>
+                  <div className="space-y-2">
+                    {modalityInfo.tasks.map((task, index) => (
+                      <div key={task.task_type} className="flex items-center text-sm text-gray-600 dark:text-gray-400">
+                        <div className="flex items-center justify-center w-6 h-6 bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rounded-full mr-2 text-xs font-medium">
+                          {index + 1}
+                        </div>
+                        {task.task_type}
+                        {index > 0 && (
+                          <span className="ml-2 text-xs text-orange-500">(Blocking)</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
+              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
+                <p className="text-sm text-blue-700 dark:text-blue-300">
+                  These deliverables and phases will be automatically created when you save the course. 
+                  Phases must be completed in order.
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Timeline and Resources */}
           <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
@@ -442,23 +561,6 @@ export default function CourseForm({ courseId = null }) {
                 />
               </div>
             </div>
-
-          </div>
-
-          {/* Course Tasks Section */}
-          <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
-            <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-6 flex items-center">
-              <ListTodo className="h-5 w-5 mr-2" />
-              Course Tasks
-            </h2>
-            
-            <TaskManager 
-              ref={taskManagerRef}
-              courseId={isEditing ? courseId : null} 
-              initialTasks={courseData?.subtasks || []} 
-              isEditing={isEditing}
-              showTitle={false}
-            />
           </div>
 
           {/* Actions */}

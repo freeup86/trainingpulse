@@ -105,6 +105,8 @@ export default function CourseDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isEditingTasks, setIsEditingTasks] = useState(false);
   const [showWorkflowMap, setShowWorkflowMap] = useState(false);
+  const [editingPhaseId, setEditingPhaseId] = useState(null);
+  const [tempPhaseStatus, setTempPhaseStatus] = useState({});
 
   const { data: courseData, isLoading, error } = useQuery({
     queryKey: ['course', id],
@@ -161,6 +163,25 @@ export default function CourseDetailPage() {
     }
   });
 
+  // Update subtask mutation for phase status changes
+  const updateSubtaskMutation = useMutation({
+    mutationFn: ({ subtaskId, updateData }) => 
+      courses.updateSubtask(id, subtaskId, updateData),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['course', id]);
+      queryClient.invalidateQueries(['courses']);
+      toast.success('Phase status updated successfully');
+      setEditingPhaseId(null);
+      setTempPhaseStatus({});
+    },
+    onError: (error) => {
+      console.error('Subtask update error:', error);
+      toast.error(error.response?.data?.error?.message || 'Failed to update phase status');
+      setEditingPhaseId(null);
+      setTempPhaseStatus({});
+    }
+  });
+
   const handleDeleteClick = () => {
     setShowDeleteDialog(true);
   };
@@ -180,6 +201,34 @@ export default function CourseDetailPage() {
       newState,
       notes: `Transitioned to ${WORKFLOW_STATES[newState]?.label || newState}`
     });
+  };
+
+  const handleStatusUpdate = (subtaskId, newStatus) => {
+    updateSubtaskMutation.mutate({
+      subtaskId,
+      updateData: { status: newStatus }
+    });
+  };
+
+  const handleStatusClick = (subtaskId, currentStatus) => {
+    setEditingPhaseId(subtaskId);
+    setTempPhaseStatus({ [subtaskId]: currentStatus });
+  };
+
+  const handleStatusChange = (subtaskId, newStatus) => {
+    setTempPhaseStatus({ [subtaskId]: newStatus });
+  };
+
+  const handleStatusConfirm = (subtaskId) => {
+    const newStatus = tempPhaseStatus[subtaskId];
+    if (newStatus) {
+      handleStatusUpdate(subtaskId, newStatus);
+    }
+  };
+
+  const handleStatusCancel = () => {
+    setEditingPhaseId(null);
+    setTempPhaseStatus({});
   };
 
   if (isLoading) {
@@ -356,7 +405,7 @@ export default function CourseDetailPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <ListTodo className="h-5 w-5" />
-                  <CardTitle>Course Tasks</CardTitle>
+                  <CardTitle>Phases of Development</CardTitle>
                 </div>
                 <Button
                   onClick={() => setIsEditingTasks(!isEditingTasks)}
@@ -365,11 +414,11 @@ export default function CourseDetailPage() {
                   className="flex items-center space-x-2"
                 >
                   <Plus className="h-4 w-4" />
-                  <span>{isEditingTasks ? 'Done' : 'Manage Tasks'}</span>
+                  <span>{isEditingTasks ? 'Done' : 'Manage Phases'}</span>
                 </Button>
               </div>
               <CardDescription>
-                Track progress on individual course components
+                Track progress on individual development phases
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -389,27 +438,27 @@ export default function CourseDetailPage() {
                           .map((subtask, index) => {
                             const getStatusIcon = (status) => {
                               switch (status) {
-                                case 'completed':
+                                case 'final':
                                   return <CheckCircle className="h-4 w-4 text-green-500" />;
-                                case 'in_progress':
+                                case 'beta_review':
+                                  return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
+                                case 'alpha_review':
                                   return <PlayCircle className="h-4 w-4 text-blue-500" />;
-                                case 'on_hold':
-                                  return <Pause className="h-4 w-4 text-yellow-500" />;
                                 default:
-                                  return <Circle className="h-4 w-4 text-gray-400" />;
+                                  return <PlayCircle className="h-4 w-4 text-blue-500" />;
                               }
                             };
 
                             const getStatusColor = (status) => {
                               switch (status) {
-                                case 'completed':
+                                case 'final':
                                   return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
-                                case 'in_progress':
-                                  return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
-                                case 'on_hold':
+                                case 'beta_review':
                                   return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+                                case 'alpha_review':
+                                  return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
                                 default:
-                                  return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
+                                  return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
                               }
                             };
 
@@ -428,13 +477,39 @@ export default function CourseDetailPage() {
                                         {subtask.title}
                                       </h4>
                                       <div className="flex items-center space-x-4 mt-1">
-                                        <Badge className={`text-xs ${getStatusColor(subtask.status)}`}>
-                                          {subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                                        </Badge>
-                                        {subtask.weight && (
-                                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                                            Weight: {subtask.weight}
-                                          </span>
+                                        {editingPhaseId === subtask.id ? (
+                                          <div className="flex items-center space-x-2">
+                                            <select
+                                              value={tempPhaseStatus[subtask.id] || subtask.status}
+                                              onChange={(e) => handleStatusChange(subtask.id, e.target.value)}
+                                              className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                            >
+                                              <option value="alpha_review">Alpha Review</option>
+                                              <option value="beta_review">Beta Review</option>
+                                              <option value="final">Final (Gold)</option>
+                                            </select>
+                                            <button
+                                              onClick={() => handleStatusConfirm(subtask.id)}
+                                              disabled={updateSubtaskMutation.isPending}
+                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
+                                            >
+                                              <CheckCircle className="h-3 w-3" />
+                                            </button>
+                                            <button
+                                              onClick={handleStatusCancel}
+                                              disabled={updateSubtaskMutation.isPending}
+                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
+                                            >
+                                              <X className="h-3 w-3" />
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleStatusClick(subtask.id, subtask.status)}
+                                            className={`text-xs px-2.5 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity ${getStatusColor(subtask.status)}`}
+                                          >
+                                            {subtask.status === 'final' ? 'Final (Gold)' : subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                          </button>
                                         )}
                                       </div>
                                     </div>
@@ -466,7 +541,7 @@ export default function CourseDetailPage() {
                   ) : (
                     <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
                       <ListTodo className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                      <p className="text-gray-500 dark:text-gray-400 mb-4">No tasks yet</p>
+                      <p className="text-gray-500 dark:text-gray-400 mb-4">No phases yet</p>
                       <Button
                         onClick={() => setIsEditingTasks(true)}
                         variant="outline"

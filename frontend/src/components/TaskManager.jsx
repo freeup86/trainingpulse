@@ -15,10 +15,9 @@ import {
 import { courses } from '../lib/api';
 
 const TASK_STATUSES = [
-  { value: 'pending', label: 'Pending', icon: Circle, color: 'text-gray-400' },
-  { value: 'in_progress', label: 'In Progress', icon: PlayCircle, color: 'text-blue-500' },
-  { value: 'on_hold', label: 'On Hold', icon: Pause, color: 'text-yellow-500' },
-  { value: 'completed', label: 'Completed', icon: CheckCircle, color: 'text-green-500' }
+  { value: 'alpha_review', label: 'Alpha Review', icon: PlayCircle, color: 'text-blue-500' },
+  { value: 'beta_review', label: 'Beta Review', icon: AlertTriangle, color: 'text-yellow-500' },
+  { value: 'final', label: 'Final (Gold)', icon: CheckCircle, color: 'text-green-500' }
 ];
 
 const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false, showTitle = true }, ref) => {
@@ -98,7 +97,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     const newTask = {
       id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       title: '',
-      status: 'pending',
+      status: 'alpha_review',
       isBlocking: false,
       weight: 1,
       orderIndex: tasks.length,
@@ -200,12 +199,12 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
 
   const getStatusBadgeColor = (status) => {
     switch (status) {
-      case 'completed':
+      case 'final':
         return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
-      case 'in_progress':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
-      case 'on_hold':
+      case 'beta_review':
         return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+      case 'alpha_review':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
       default:
         return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
     }
@@ -232,13 +231,13 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     <div className="space-y-4">
       {showTitle && (
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Course Tasks</h3>
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white">Phases of Development</h3>
           <button
             onClick={addTask}
             className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-400 dark:bg-blue-900/20 dark:hover:bg-blue-900/30"
           >
             <Plus className="h-4 w-4 mr-1" />
-            Add Task
+            Add Phase
           </button>
         </div>
       )}
@@ -305,27 +304,13 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
                         </select>
                       </div>
 
-                      {/* Weight */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Weight
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="10"
-                          value={task.weight}
-                          onChange={(e) => updateTask(index, 'weight', parseInt(e.target.value) || 1)}
-                          className="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                        />
-                      </div>
 
                     </div>
 
                     {/* Status Badge */}
                     <div className="flex items-center space-x-2">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(task.status)}`}>
-                        {task.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        {task.status === 'final' ? 'Final (Gold)' : task.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                       </span>
                     </div>
                   </div>
@@ -365,7 +350,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
             className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-400 dark:bg-blue-900/20 dark:hover:bg-blue-900/30"
           >
             <Plus className="h-4 w-4 mr-1" />
-            Add Task
+            Add Phase
           </button>
         </div>
       )}

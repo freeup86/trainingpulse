@@ -49,7 +49,7 @@ Subject Matter Experts (SMEs), reviewers, or stakeholders who need to view and p
 - All Member permissions, plus:
 - Create new courses
 - Edit courses assigned to them
-- Manage course subtasks
+- Manage course phases
 - Update course status and progress
 - Upload and manage course materials
 - Collaborate with team members on content

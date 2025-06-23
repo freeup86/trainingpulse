@@ -135,6 +135,16 @@ export const courses = {
     
   transitionWorkflow: (courseId, newState, notes = '') =>
     api.post(`/courses/${courseId}/transition`, { newState, notes }),
+
+  // Deliverable and modality operations
+  getDeliverables: () =>
+    api.get('/courses/deliverables'),
+    
+  getModalityDeliverables: (modality) =>
+    api.get(`/courses/deliverables/${modality}`),
+    
+  getModalityInfo: (modality) =>
+    api.get(`/courses/modality-info/${modality}`),
 };
 
 export const teams = {
