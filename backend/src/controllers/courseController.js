@@ -10,6 +10,14 @@ const logger = require('../utils/logger');
 const createCourseSchema = Joi.object({
   title: Joi.string().min(3).max(255).required().trim(),
   description: Joi.string().max(2000).optional().allow(''),
+  modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
+  deliverables: Joi.array().items(
+    Joi.number().integer().positive()
+  ).optional().when('modality', {
+    is: 'WBT',
+    then: Joi.array().min(1).required(),
+    otherwise: Joi.optional()
+  }),
   type: Joi.string().valid('standard', 'compliance', 'certification').default('standard'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
   startDate: Joi.date().optional(),
@@ -26,15 +34,6 @@ const createCourseSchema = Joi.object({
     Joi.object({
       userId: Joi.number().integer().positive().required(),
       role: Joi.string().valid('owner', 'designer', 'reviewer', 'approver', 'sme').required()
-    })
-  ).optional(),
-  tasks: Joi.array().items(
-    Joi.object({
-      title: Joi.string().min(1).max(255).required().trim(),
-      status: Joi.string().valid('pending', 'in_progress', 'completed', 'on_hold').default('pending'),
-      isBlocking: Joi.boolean().default(false),
-      weight: Joi.number().integer().min(1).max(100).default(1),
-      orderIndex: Joi.number().integer().min(0).optional()
     })
   ).optional()
 });
@@ -54,10 +53,11 @@ const updateCourseSchema = Joi.object({
 
 const subtaskSchema = Joi.object({
   title: Joi.string().min(1).max(255).required().trim(),
-  status: Joi.string().valid('pending', 'in_progress', 'completed', 'on_hold').default('pending'),
+  status: Joi.string().valid('pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final').default('pending'),
   isBlocking: Joi.boolean().default(false),
   weight: Joi.number().integer().min(1).max(100).default(1),
-  orderIndex: Joi.number().integer().min(1).optional()
+  orderIndex: Joi.number().integer().min(1).optional(),
+  assignedUserId: Joi.number().integer().positive().optional()
 });
 
 class CourseController {
@@ -213,6 +213,8 @@ class CourseController {
     const {
       title,
       description,
+      modality,
+      deliverables = [],
       type,
       priority,
       startDate,
@@ -221,8 +223,7 @@ class CourseController {
       estimatedDailyHours,
       workflowTemplateId,
       metadata,
-      assignments = [],
-      tasks = []
+      assignments = []
     } = value;
 
     // Check if workflow template exists
@@ -238,17 +239,17 @@ class CourseController {
       }]);
     }
 
-    const course = await transaction(async (client) => {
+    const result = await transaction(async (client) => {
       // Create course
       const courseResult = await client.query(`
         INSERT INTO courses (
-          title, description, type, priority, status, start_date, due_date,
+          title, description, modality, type, priority, status, start_date, due_date,
           estimated_hours, estimated_daily_hours, metadata, created_by, updated_by,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `, [
-        title, description, type, priority, startDate, dueDate,
+        title, description, modality, type, priority, startDate, dueDate,
         estimatedHours, estimatedDailyHours, JSON.stringify(metadata || {}),
         req.user.id
       ]);
@@ -287,20 +288,52 @@ class CourseController {
         `, [newCourse.id, assignment.userId, assignment.role, req.user.id]);
       }
 
-      // Create initial tasks/subtasks
-      for (let i = 0; i < tasks.length; i++) {
-        const task = tasks[i];
+      // Auto-assign deliverables based on modality
+      if (modality === 'WBT') {
+        // For WBT, use user-selected deliverables
+        for (const deliverableId of deliverables) {
+          await client.query(`
+            INSERT INTO course_deliverables (course_id, deliverable_id)
+            VALUES ($1, $2)
+          `, [newCourse.id, deliverableId]);
+        }
+      } else {
+        // For other modalities, auto-assign deliverables
+        const autoDeliverables = await client.query(`
+          SELECT d.id
+          FROM deliverables d
+          INNER JOIN modality_deliverables md ON d.id = md.deliverable_id
+          WHERE md.modality = $1 AND md.is_optional = false
+        `, [modality]);
+
+        for (const deliverable of autoDeliverables.rows) {
+          await client.query(`
+            INSERT INTO course_deliverables (course_id, deliverable_id)
+            VALUES ($1, $2)
+          `, [newCourse.id, deliverable.id]);
+        }
+      }
+
+      // Auto-create tasks based on modality
+      const modalityTasks = await client.query(`
+        SELECT task_type, order_index
+        FROM modality_tasks
+        WHERE modality = $1
+        ORDER BY order_index
+      `, [modality]);
+
+      for (const task of modalityTasks.rows) {
         await client.query(`
           INSERT INTO course_subtasks (
-            course_id, title, status, is_blocking, weight, order_index, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            course_id, title, task_type, status, is_blocking, weight, order_index, created_at, updated_at
+          ) VALUES ($1, $2, $3, 'pending', $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         `, [
-          newCourse.id, 
-          task.title, 
-          task.status || 'pending', 
-          task.isBlocking || false, 
-          task.weight || 1, 
-          task.orderIndex !== undefined ? task.orderIndex : i + 1
+          newCourse.id,
+          task.task_type, // Use task_type as title
+          task.task_type,
+          task.order_index > 1, // Tasks after the first are blocking
+          1, // Default weight
+          task.order_index
         ]);
       }
 
@@ -316,16 +349,20 @@ class CourseController {
         'created',
         JSON.stringify({
           title,
+          modality,
           type,
           priority,
           workflowTemplateId,
           assignmentCount: assignments.length,
-          taskCount: tasks.length
+          deliverableCount: modality === 'WBT' ? deliverables.length : modalityTasks.rows.length,
+          taskCount: modalityTasks.rows.length
         })
       ]);
 
-      return newCourse;
+      return { course: newCourse, tasksCreated: modalityTasks.rows.length };
     });
+
+    const course = result.course;
 
     // Initial status calculation
     await this.statusAggregator.updateCourseStatus(course.id, { 
@@ -352,7 +389,9 @@ class CourseController {
     logger.info('Course created successfully', {
       courseId: course.id,
       title,
+      modality,
       type,
+      tasksCreated: result.tasksCreated,
       userId: req.user.id
     });
 
@@ -360,7 +399,8 @@ class CourseController {
       success: true,
       data: {
         course,
-        message: 'Course created successfully'
+        tasksCreated: result.tasksCreated,
+        message: `Course created successfully with ${result.tasksCreated} auto-generated tasks`
       }
     });
   });
@@ -748,6 +788,75 @@ class CourseController {
       data: {
         statusData,
         message: 'Status recalculated successfully'
+      }
+    });
+  });
+
+  /**
+   * GET /courses/deliverables - Get all deliverables
+   */
+  getDeliverables = asyncHandler(async (req, res) => {
+    const deliverables = await query(`
+      SELECT * FROM deliverables
+      WHERE is_active = true
+      ORDER BY name
+    `);
+
+    res.json({
+      success: true,
+      data: deliverables.rows
+    });
+  });
+
+  /**
+   * GET /courses/deliverables/:modality - Get deliverables for a specific modality
+   */
+  getModalityDeliverables = asyncHandler(async (req, res) => {
+    const { modality } = req.params;
+
+    const deliverables = await query(`
+      SELECT d.id, d.name, d.description, md.is_optional
+      FROM deliverables d
+      INNER JOIN modality_deliverables md ON d.id = md.deliverable_id
+      WHERE md.modality = $1 AND d.is_active = true
+      ORDER BY d.name
+    `, [modality]);
+
+    res.json({
+      success: true,
+      data: deliverables.rows
+    });
+  });
+
+  /**
+   * GET /courses/modality-info/:modality - Get complete modality information
+   */
+  getModalityInfo = asyncHandler(async (req, res) => {
+    const { modality } = req.params;
+
+    // Get deliverables
+    const deliverables = await query(`
+      SELECT d.id, d.name, d.description, md.is_optional
+      FROM deliverables d
+      INNER JOIN modality_deliverables md ON d.id = md.deliverable_id
+      WHERE md.modality = $1 AND d.is_active = true
+      ORDER BY d.name
+    `, [modality]);
+
+    // Get tasks
+    const tasks = await query(`
+      SELECT task_type, order_index
+      FROM modality_tasks
+      WHERE modality = $1
+      ORDER BY order_index
+    `, [modality]);
+
+    res.json({
+      success: true,
+      data: {
+        modality,
+        deliverables: deliverables.rows,
+        tasks: tasks.rows
       }
     });
   });

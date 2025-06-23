@@ -7,6 +7,12 @@ const router = express.Router();
 // Course CRUD operations
 router.get('/', courseController.getCourses);
 router.post('/', authorize(['admin', 'manager', 'designer']), courseController.createCourse);
+
+// Deliverable and modality operations (must come before /:id routes)
+router.get('/deliverables', courseController.getDeliverables);
+router.get('/deliverables/:modality', courseController.getModalityDeliverables);
+router.get('/modality-info/:modality', courseController.getModalityInfo);
+
 router.get('/:id', authorizeResource('course'), courseController.getCourseById);
 router.put('/:id', authorizeResource('course'), courseController.updateCourse);
 router.delete('/:id', authorize(['admin', 'manager']), courseController.deleteCourse);

@@ -33,7 +33,7 @@ async function getMigrationFiles() {
   const files = await fs.readdir(migrationsDir);
   
   return files
-    .filter(file => file.endsWith('.sql') && (file.startsWith('001_') || file.startsWith('002_') || file.startsWith('003_') || file.startsWith('004_')))
+    .filter(file => file.endsWith('.sql') && /^\d{3}_/.test(file))
     .sort();
 }
 
