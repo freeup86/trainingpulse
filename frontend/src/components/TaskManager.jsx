@@ -54,13 +54,13 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
   const createSubtaskMutation = useMutation({
     mutationFn: (subtaskData) => courses.createSubtask(courseId, subtaskData),
     onSuccess: () => {
-      toast.success('Task created successfully');
+      toast.success('Phase created successfully');
       if (courseId) {
         queryClient.invalidateQueries(['course', courseId]);
       }
     },
     onError: (error) => {
-      toast.error(error.response?.data?.error?.message || 'Failed to create task');
+      toast.error(error.response?.data?.error?.message || 'Failed to create phase');
     }
   });
 
@@ -68,14 +68,19 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
   const updateSubtaskMutation = useMutation({
     mutationFn: ({ subtaskId, updateData }) => 
       courses.updateSubtask(courseId, subtaskId, updateData),
-    onSuccess: () => {
-      toast.success('Task updated successfully');
+    onSuccess: (data, variables) => {
+      // Show different messages for status vs other updates
+      if (variables.updateData.status && Object.keys(variables.updateData).length === 1) {
+        toast.success('Phase status updated successfully');
+      } else {
+        toast.success('Phase updated successfully');
+      }
       if (courseId) {
         queryClient.invalidateQueries(['course', courseId]);
       }
     },
     onError: (error) => {
-      toast.error(error.response?.data?.error?.message || 'Failed to update task');
+      toast.error(error.response?.data?.error?.message || 'Failed to update phase');
     }
   });
 
@@ -83,13 +88,13 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
   const deleteSubtaskMutation = useMutation({
     mutationFn: (subtaskId) => courses.deleteSubtask(courseId, subtaskId),
     onSuccess: () => {
-      toast.success('Task deleted successfully');
+      toast.success('Phase deleted successfully');
       if (courseId) {
         queryClient.invalidateQueries(['course', courseId]);
       }
     },
     onError: (error) => {
-      toast.error(error.response?.data?.error?.message || 'Failed to delete task');
+      toast.error(error.response?.data?.error?.message || 'Failed to delete phase');
     }
   });
 
@@ -110,6 +115,22 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     const updatedTasks = [...tasks];
     updatedTasks[index] = { ...updatedTasks[index], [field]: value };
     setTasks(updatedTasks);
+    
+    // Auto-save status changes for existing tasks
+    if (field === 'status' && courseId && !updatedTasks[index].isNew) {
+      autoSaveStatus(updatedTasks[index], value);
+    }
+  };
+
+  const autoSaveStatus = async (task, newStatus) => {
+    try {
+      await updateSubtaskMutation.mutateAsync({
+        subtaskId: task.id,
+        updateData: { status: newStatus }
+      });
+    } catch (error) {
+      // Error is handled by the mutation
+    }
   };
 
   const removeTask = async (index) => {
@@ -135,7 +156,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     const task = tasks[index];
     
     if (!task.title.trim()) {
-      toast.error('Task title is required');
+      toast.error('Phase title is required');
       return;
     }
 
@@ -246,13 +267,13 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
         <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
           <div className="flex flex-col items-center space-y-2">
             <Circle className="h-8 w-8 text-gray-400" />
-            <p className="text-gray-500 dark:text-gray-400">No tasks yet</p>
+            <p className="text-gray-500 dark:text-gray-400">No phases yet</p>
             <button
               onClick={addTask}
               className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-400 dark:bg-blue-900/20 dark:hover:bg-blue-900/30"
             >
               <Plus className="h-4 w-4 mr-1" />
-              Add First Task
+              Add First Phase
             </button>
           </div>
         </div>
@@ -279,7 +300,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
                         type="text"
                         value={task.title}
                         onChange={(e) => updateTask(index, 'title', e.target.value)}
-                        placeholder="Enter task title..."
+                        placeholder="Enter phase title..."
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                       />
                     </div>
@@ -322,7 +343,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
                         onClick={() => saveTask(index)}
                         disabled={createSubtaskMutation.isPending || updateSubtaskMutation.isPending}
                         className="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
-                        title="Save task"
+                        title="Save phase"
                       >
                         <Save className="h-3 w-3" />
                       </button>
@@ -331,7 +352,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
                       onClick={() => removeTask(index)}
                       disabled={deleteSubtaskMutation.isPending}
                       className="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded text-red-600 bg-red-100 hover:bg-red-200 dark:text-red-400 dark:bg-red-900/20 dark:hover:bg-red-900/30 disabled:opacity-50"
-                      title="Delete task"
+                      title="Delete phase"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
