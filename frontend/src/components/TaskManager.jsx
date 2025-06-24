@@ -251,16 +251,27 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
 
   const getStatusBadgeColor = (status) => {
     const statusConfig = phaseStatusesData?.find(s => s.value === status);
-    if (statusConfig) {
+    if (statusConfig && statusConfig.color) {
       // Convert text color to background color for badges
-      const baseColor = statusConfig.color.replace('text-', '').replace('-500', '');
+      let baseColor = statusConfig.color;
+      
+      // Handle different color formats
+      if (baseColor.includes('text-')) {
+        baseColor = baseColor.replace('text-', '').replace('-500', '').replace('-600', '').replace('-400', '');
+      }
+      
+      // Special handling for yellow/gold colors
+      if (baseColor.includes('yellow')) {
+        return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200';
+      }
+      
       return `bg-${baseColor}-100 text-${baseColor}-800 dark:bg-${baseColor}-900/20 dark:text-${baseColor}-300`;
     }
     
     // Fallback for hardcoded statuses or unknown statuses
     switch (status) {
       case 'final':
-        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400';
+        return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200';
       case 'beta_review':
         return 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300';
       case 'alpha_review':

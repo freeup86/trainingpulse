@@ -480,22 +480,58 @@ export default function CourseDetailPage() {
 
                             const getStatusColor = (status) => {
                               const statusConfig = phaseStatusesData?.find(s => s.value === status);
-                              if (statusConfig) {
+                              if (statusConfig && statusConfig.color) {
                                 // Convert text color to background color for badges
-                                const baseColor = statusConfig.color.replace('text-', '').replace('-500', '').replace('-600', '');
+                                let baseColor = statusConfig.color;
+                                
+                                // Handle different color formats
+                                if (baseColor.includes('text-')) {
+                                  baseColor = baseColor.replace('text-', '').replace('-500', '').replace('-600', '').replace('-400', '');
+                                }
+                                
+                                // Special handling for yellow/gold colors
+                                if (baseColor.includes('yellow')) {
+                                  return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200';
+                                }
+                                
                                 return `bg-${baseColor}-100 text-${baseColor}-800 dark:bg-${baseColor}-900/20 dark:text-${baseColor}-300`;
                               }
                               
                               // Fallback for hardcoded statuses
                               switch (status) {
                                 case 'final':
-                                  return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400';
+                                  return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200';
                                 case 'beta_review':
                                   return 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300';
                                 case 'alpha_review':
                                   return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
                                 default:
-                                  return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
+                                  return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
+                              }
+                            };
+
+                            const getCompletionPercentage = (status) => {
+                              const statusConfig = phaseStatusesData?.find(s => s.value === status);
+                              if (statusConfig && statusConfig.completionPercentage !== undefined) {
+                                return statusConfig.completionPercentage;
+                              }
+                              
+                              // Fallback for hardcoded statuses
+                              switch (status) {
+                                case 'final':
+                                  return 10;
+                                case 'beta_review':
+                                  return 30;
+                                case 'alpha_review':
+                                  return 60;
+                                case 'completed':
+                                  return 100;
+                                case 'in_progress':
+                                  return 50;
+                                case 'pending':
+                                  return 0;
+                                default:
+                                  return 0;
                               }
                             };
 
@@ -510,9 +546,30 @@ export default function CourseDetailPage() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-start justify-between">
                                     <div className="flex-1">
-                                      <h4 className="text-sm font-medium text-gray-900 dark:text-white">
-                                        {subtask.title}
-                                      </h4>
+                                      <div className="flex items-center space-x-2">
+                                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                                          {subtask.title}
+                                        </h4>
+                                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                                          ({getCompletionPercentage(subtask.status)}% complete)
+                                        </span>
+                                      </div>
+                                      {(subtask.start_date || subtask.finish_date) && (
+                                        <div className="flex items-center space-x-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                          {subtask.start_date && (
+                                            <div className="flex items-center space-x-1">
+                                              <Calendar className="h-3 w-3" />
+                                              <span>Started: {new Date(subtask.start_date).toLocaleDateString()}</span>
+                                            </div>
+                                          )}
+                                          {subtask.finish_date && (
+                                            <div className="flex items-center space-x-1">
+                                              <CheckCircle className="h-3 w-3" />
+                                              <span>Finished: {new Date(subtask.finish_date).toLocaleDateString()}</span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
                                       <div className="flex items-center space-x-4 mt-1">
                                         {editingPhaseId === subtask.id ? (
                                           <div className="flex items-center space-x-2">
@@ -572,23 +629,6 @@ export default function CourseDetailPage() {
                           })}
                       </div>
                       
-                      {/* Progress Summary */}
-                      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">Progress</span>
-                          <span className="font-medium text-gray-900 dark:text-white">
-                            {course.subtasks.filter(t => t.status === 'completed').length} of {course.subtasks.length} completed
-                          </span>
-                        </div>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-2">
-                          <div 
-                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                            style={{ 
-                              width: `${(course.subtasks.filter(t => t.status === 'completed').length / course.subtasks.length) * 100}%` 
-                            }}
-                          ></div>
-                        </div>
-                      </div>
                     </>
                   ) : (
                     <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">

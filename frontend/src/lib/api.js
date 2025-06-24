@@ -129,6 +129,10 @@ export const courses = {
     
   deleteSubtask: (courseId, subtaskId) =>
     api.delete(`/courses/${courseId}/subtasks/${subtaskId}`),
+
+  // Phase status history operations
+  updatePhaseStatusHistory: (courseId, subtaskId, historyId, dateData) =>
+    api.put(`/courses/${courseId}/subtasks/${subtaskId}/phase-history/${historyId}`, dateData),
     
   recalculateStatus: (courseId) =>
     api.post(`/courses/${courseId}/recalculate-status`),

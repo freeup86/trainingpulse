@@ -177,6 +177,8 @@ export default function AdminPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['admin-phase-statuses']);
+      queryClient.invalidateQueries(['phase-statuses']);
+      queryClient.invalidateQueries(['courses']);
       toast.success('Phase status created successfully');
       resetPhaseStatusForm();
     },
@@ -192,6 +194,8 @@ export default function AdminPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['admin-phase-statuses']);
+      queryClient.invalidateQueries(['phase-statuses']);
+      queryClient.invalidateQueries(['courses']);
       toast.success('Phase status updated successfully');
       resetPhaseStatusForm();
     },
@@ -207,6 +211,8 @@ export default function AdminPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['admin-phase-statuses']);
+      queryClient.invalidateQueries(['phase-statuses']);
+      queryClient.invalidateQueries(['courses']);
       toast.success('Phase status deleted successfully');
     },
     onError: (error) => {
