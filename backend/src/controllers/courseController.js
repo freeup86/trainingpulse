@@ -787,6 +787,95 @@ class CourseController {
   });
 
   /**
+   * PUT /courses/:id/subtasks/:subtaskId/phase-history/:historyId - Update phase status history dates
+   */
+  updatePhaseStatusHistory = asyncHandler(async (req, res) => {
+    const { historyId } = req.params;
+    const { started_at, finished_at } = req.body;
+
+    // Validate input
+    const schema = Joi.object({
+      started_at: Joi.date().optional(),
+      finished_at: Joi.date().optional().when('started_at', {
+        is: Joi.exist(),
+        then: Joi.date().min(Joi.ref('started_at')),
+        otherwise: Joi.date()
+      })
+    });
+
+    const { error, value } = schema.validate({ started_at, finished_at });
+    if (error) {
+      throw new ValidationError('Invalid date data', error.details);
+    }
+
+    // Update the phase status history record
+    await transaction(async (client) => {
+      const updateFields = [];
+      const values = [];
+      let paramIndex = 1;
+
+      if (value.started_at !== undefined) {
+        updateFields.push(`started_at = $${paramIndex++}`);
+        values.push(value.started_at);
+      }
+
+      if (value.finished_at !== undefined) {
+        updateFields.push(`finished_at = $${paramIndex++}`);
+        values.push(value.finished_at);
+      }
+
+      if (updateFields.length === 0) {
+        throw new ValidationError('No valid date fields provided');
+      }
+
+      updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
+      values.push(historyId);
+
+      const result = await client.query(`
+        UPDATE phase_status_history 
+        SET ${updateFields.join(', ')}
+        WHERE id = $${paramIndex}
+        RETURNING *
+      `, values);
+
+      if (result.rows.length === 0) {
+        throw new NotFoundError(`Phase status history record ${historyId} not found`);
+      }
+
+      // Log the update
+      await client.query(`
+        INSERT INTO audit_logs (
+          user_id, entity_type, entity_id, action, changes, created_at
+        ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      `, [
+        req.user.id,
+        'phase_status_history',
+        historyId,
+        'updated',
+        JSON.stringify({
+          started_at: { to: value.started_at },
+          finished_at: { to: value.finished_at }
+        })
+      ]);
+
+      return result.rows[0];
+    });
+
+    logger.info('Phase status history updated', {
+      historyId,
+      userId: req.user.id,
+      changes: value
+    });
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Phase status history updated successfully'
+      }
+    });
+  });
+
+  /**
    * GET /courses/:id/status - Get course status calculation
    */
   getCourseStatus = asyncHandler(async (req, res) => {

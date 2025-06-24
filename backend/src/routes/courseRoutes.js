@@ -22,6 +22,9 @@ router.post('/:id/subtasks', authorizeResource('course'), courseController.creat
 router.put('/:id/subtasks/:subtaskId', authorizeResource('course'), courseController.updateSubtask);
 router.delete('/:id/subtasks/:subtaskId', authorizeResource('course'), courseController.deleteSubtask);
 
+// Phase status history operations
+router.put('/:id/subtasks/:subtaskId/phase-history/:historyId', authorizeResource('course'), courseController.updatePhaseStatusHistory);
+
 // Status operations
 router.get('/:id/status', authorizeResource('course'), courseController.getCourseStatus);
 router.post('/:id/recalculate-status', authorize(['admin', 'manager']), courseController.recalculateStatus);

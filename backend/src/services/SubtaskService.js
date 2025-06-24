@@ -19,7 +19,7 @@ class SubtaskService {
     try {
       const {
         title,
-        status = 'pending',
+        status = 'alpha_review', // Start with alpha_review instead of pending
         isBlocking = false,
         weight = 1,
         orderIndex
@@ -52,6 +52,13 @@ class SubtaskService {
 
         const newSubtask = result.rows[0];
 
+        // Auto-create Alpha Review phase status history entry
+        // Every new phase starts in Alpha Review
+        await client.query(`
+          INSERT INTO phase_status_history (subtask_id, status, started_at, created_at, updated_at)
+          VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `, [newSubtask.id, 'alpha_review']);
+
         // Log the creation
         await client.query(`
           INSERT INTO audit_logs (
@@ -68,7 +75,8 @@ class SubtaskService {
             status,
             isBlocking,
             weight,
-            orderIndex: finalOrderIndex
+            orderIndex: finalOrderIndex,
+            autoCreatedAlphaReview: true
           })
         ]);
 
@@ -143,6 +151,42 @@ class SubtaskService {
         changes.completed_at = { from: currentSubtask.completed_at, to: null };
       }
 
+      // Handle phase start and finish dates
+      const statusChanged = updates.status && updates.status !== currentSubtask.status;
+      if (statusChanged) {
+        const oldStatus = currentSubtask.status;
+        const newStatus = updates.status;
+        
+        // Set start_date when moving from 'pending' to any active status
+        if (oldStatus === 'pending' && newStatus !== 'pending' && !currentSubtask.start_date) {
+          updates.start_date = new Date();
+          changes.start_date = { from: null, to: updates.start_date };
+        }
+        
+        // Set finish_date when moving to completion statuses
+        const completionStatuses = ['final', 'completed'];
+        const wasNotCompleted = !completionStatuses.includes(oldStatus);
+        const isNowCompleted = completionStatuses.includes(newStatus);
+        
+        if (wasNotCompleted && isNowCompleted && !currentSubtask.finish_date) {
+          updates.finish_date = new Date();
+          changes.finish_date = { from: null, to: updates.finish_date };
+        }
+        
+        // Clear finish_date if moving away from completion status
+        if (completionStatuses.includes(oldStatus) && !completionStatuses.includes(newStatus)) {
+          updates.finish_date = null;
+          changes.finish_date = { from: currentSubtask.finish_date, to: null };
+        }
+        
+        // Track status history for detailed phase tracking
+        changes.statusHistory = {
+          oldStatus,
+          newStatus,
+          subtaskId
+        };
+      }
+
       if (Object.keys(updates).length === 0) {
         return currentSubtask; // No changes to make
       }
@@ -163,6 +207,113 @@ class SubtaskService {
         `, values);
 
         const updated = result.rows[0];
+
+        // Handle status history tracking
+        if (changes.statusHistory) {
+          const { oldStatus, newStatus } = changes.statusHistory;
+          
+          logger.info('Status transition detected', {
+            subtaskId,
+            oldStatus,
+            newStatus,
+            userId
+          });
+          
+          // Define phase hierarchy for backward movement detection
+          const phaseHierarchy = ['alpha_review', 'beta_review', 'final'];
+          const oldIndex = phaseHierarchy.indexOf(oldStatus);
+          const newIndex = phaseHierarchy.indexOf(newStatus);
+          const isBackwardMovement = oldIndex > newIndex && oldIndex !== -1 && newIndex !== -1;
+          
+          logger.info('Phase transition analysis', {
+            subtaskId,
+            oldStatus,
+            newStatus,
+            oldIndex,
+            newIndex,
+            isBackwardMovement
+          });
+          
+          // If moving backward, clear all future phase history entries
+          if (isBackwardMovement) {
+            const futurePhases = phaseHierarchy.slice(newIndex + 1);
+            logger.info('Clearing future phase history', {
+              subtaskId,
+              futurePhases
+            });
+            
+            for (const futurePhase of futurePhases) {
+              const deleteResult = await client.query(`
+                DELETE FROM phase_status_history 
+                WHERE subtask_id = $1 AND status = $2
+                RETURNING *
+              `, [subtaskId, futurePhase]);
+              
+              if (deleteResult.rowCount > 0) {
+                logger.info('Cleared future phase history', {
+                  subtaskId,
+                  clearedPhase: futurePhase,
+                  deletedRecords: deleteResult.rows
+                });
+              }
+            }
+          }
+          
+          // Finish the previous status if it exists and is not pending
+          if (oldStatus && oldStatus !== 'pending') {
+            const updateResult = await client.query(`
+              UPDATE phase_status_history 
+              SET finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+              WHERE subtask_id = $1 AND status = $2 AND finished_at IS NULL
+              RETURNING *
+            `, [subtaskId, oldStatus]);
+            
+            logger.info('Finished previous status', {
+              subtaskId,
+              oldStatus,
+              updatedRecords: updateResult.rowCount,
+              finishedRecord: updateResult.rows[0]
+            });
+          }
+          
+          // Start or reactivate the new status if it's not pending
+          if (newStatus && newStatus !== 'pending') {
+            // First, check if this status already exists for this subtask
+            const existingResult = await client.query(`
+              SELECT * FROM phase_status_history 
+              WHERE subtask_id = $1 AND status = $2
+            `, [subtaskId, newStatus]);
+            
+            if (existingResult.rows.length > 0) {
+              // Reactivate existing status by clearing finished_at and updating started_at
+              const reactivateResult = await client.query(`
+                UPDATE phase_status_history 
+                SET finished_at = NULL, started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE subtask_id = $1 AND status = $2
+                RETURNING *
+              `, [subtaskId, newStatus]);
+              
+              logger.info('Reactivated existing status', {
+                subtaskId,
+                newStatus,
+                reactivatedRecord: reactivateResult.rows[0]
+              });
+            } else {
+              // Create new status entry if it doesn't exist
+              const insertResult = await client.query(`
+                INSERT INTO phase_status_history (subtask_id, status, started_at, created_at, updated_at)
+                VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING *
+              `, [subtaskId, newStatus]);
+              
+              logger.info('Started new status', {
+                subtaskId,
+                newStatus,
+                newRecord: insertResult.rows[0]
+              });
+            }
+          }
+        }
 
         // Log the update
         await client.query(`
@@ -354,6 +505,8 @@ class SubtaskService {
           weight,
           order_index,
           completed_at,
+          start_date,
+          finish_date,
           created_at,
           updated_at
         FROM course_subtasks
@@ -361,7 +514,20 @@ class SubtaskService {
         ${orderClause}
       `, params);
 
-      return result.rows;
+      // Get status history for each subtask
+      const subtasks = result.rows;
+      for (const subtask of subtasks) {
+        const historyResult = await query(`
+          SELECT id, status, started_at, finished_at
+          FROM phase_status_history
+          WHERE subtask_id = $1
+          ORDER BY started_at ASC
+        `, [subtask.id]);
+        
+        subtask.status_history = historyResult.rows;
+      }
+
+      return subtasks;
 
     } catch (error) {
       logger.logError(error, {
