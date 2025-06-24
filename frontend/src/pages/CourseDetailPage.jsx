@@ -20,7 +20,8 @@ import {
   PlayCircle,
   Trash2,
   Plus,
-  X
+  X,
+  Package
 } from 'lucide-react';
 import { courses, statuses, phaseStatuses } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
@@ -108,6 +109,7 @@ export default function CourseDetailPage() {
   const [showWorkflowMap, setShowWorkflowMap] = useState(false);
   const [editingPhaseId, setEditingPhaseId] = useState(null);
   const [tempPhaseStatus, setTempPhaseStatus] = useState({});
+  const [isEditingCourseStatus, setIsEditingCourseStatus] = useState(false);
 
   const { data: courseData, isLoading, error } = useQuery({
     queryKey: ['course', id],
@@ -192,6 +194,22 @@ export default function CourseDetailPage() {
     }
   });
 
+  // Update course status mutation
+  const updateCourseStatusMutation = useMutation({
+    mutationFn: (newStatus) => courses.update(id, { status: newStatus }),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['course', id]);
+      queryClient.invalidateQueries(['courses']);
+      toast.success('Course status updated successfully');
+      setIsEditingCourseStatus(false);
+    },
+    onError: (error) => {
+      console.error('Course status update error:', error);
+      toast.error(error.response?.data?.error?.message || 'Failed to update course status');
+      setIsEditingCourseStatus(false);
+    }
+  });
+
   const handleDeleteClick = () => {
     setShowDeleteDialog(true);
   };
@@ -211,6 +229,10 @@ export default function CourseDetailPage() {
       newState,
       notes: `Transitioned to ${WORKFLOW_STATES[newState]?.label || newState}`
     });
+  };
+
+  const handleCourseStatusUpdate = (newStatus) => {
+    updateCourseStatusMutation.mutate(newStatus);
   };
 
   const handleStatusUpdate = (subtaskId, newStatus) => {
@@ -365,9 +387,9 @@ export default function CourseDetailPage() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Type</h4>
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Modality</h4>
                     <Badge variant="outline" className="capitalize">
-                      {course.type?.replace('_', ' ')}
+                      {course.modality}
                     </Badge>
                   </div>
                   
@@ -388,6 +410,45 @@ export default function CourseDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Course Deliverables */}
+          {course?.deliverables && course.deliverables.length > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center space-x-2">
+                  <Package className="h-5 w-5" />
+                  <CardTitle>Course Deliverables</CardTitle>
+                </div>
+                <CardDescription>
+                  Deliverables associated with this course
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {course.deliverables.map((deliverable, index) => (
+                    <div 
+                      key={deliverable.id || index}
+                      className="flex items-center space-x-3 p-3 rounded-lg border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800/50"
+                    >
+                      <div className="flex-shrink-0">
+                        <Package className="h-4 w-4 text-blue-500" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                          {deliverable.name}
+                        </h4>
+                        {deliverable.description && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {deliverable.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Course Content */}
           {course.content && (
@@ -664,11 +725,45 @@ export default function CourseDetailPage() {
                   <StatusIcon className={`h-4 w-4 ${statusInfo.color}`} />
                   <span className="text-sm font-medium text-gray-900 dark:text-white">Status</span>
                 </div>
-                <Badge className={statusInfo.color}>
-                  {statusInfo.label}
-                </Badge>
+                {isEditingCourseStatus ? (
+                  <div className="flex items-center space-x-2">
+                    <select
+                      value={courseStatus}
+                      onChange={(e) => handleCourseStatusUpdate(e.target.value)}
+                      className="text-sm px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      disabled={updateCourseStatusMutation.isPending}
+                      autoFocus
+                    >
+                      {(statusesData?.data || statusesData || []).map((status) => (
+                        <option key={status.value} value={status.value}>
+                          {status.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => setIsEditingCourseStatus(false)}
+                      className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                      disabled={updateCourseStatusMutation.isPending}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    {updateCourseStatusMutation.isPending && (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    )}
+                  </div>
+                ) : (
+                  <div 
+                    className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 transition-colors group"
+                    onClick={() => setIsEditingCourseStatus(true)}
+                    title="Click to change status"
+                  >
+                    <Badge className={statusInfo.color}>
+                      {statusInfo.label}
+                    </Badge>
+                    <Edit className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                )}
               </div>
-
 
             </CardContent>
           </Card>

@@ -148,7 +148,7 @@ export const courses = {
     api.get(`/courses/deliverables/${modality}`),
     
   getModalityInfo: (modality) =>
-    api.get(`/courses/modality-info/${modality}`),
+    api.get(`/courses/modality-info/${encodeURIComponent(modality)}`),
 };
 
 export const teams = {

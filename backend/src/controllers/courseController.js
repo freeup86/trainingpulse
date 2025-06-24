@@ -21,7 +21,7 @@ const createCourseSchema = Joi.object({
   type: Joi.string().valid('standard', 'compliance', 'certification').default('standard'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
   startDate: Joi.date().optional(),
-  dueDate: Joi.date().required().when('startDate', {
+  dueDate: Joi.date().optional().allow('').when('startDate', {
     is: Joi.exist(),
     then: Joi.date().min(Joi.ref('startDate')),
     otherwise: Joi.date()
@@ -266,7 +266,7 @@ class CourseController {
           title, description, modality, type, priority, status, start_date, due_date,
           estimated_hours, estimated_daily_hours, metadata, created_by, updated_by,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, 'pre_development', $6, $7, $8, $9, $10, $11, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `, [
         title, description, modality, type, priority, startDate, dueDate,
@@ -478,7 +478,14 @@ class CourseController {
             'title', dc.title,
             'type', cd.dependency_type
           )
-        ) FILTER (WHERE cd.depends_on_course_id IS NOT NULL) as dependencies
+        ) FILTER (WHERE cd.depends_on_course_id IS NOT NULL) as dependencies,
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'id', d.id,
+            'name', d.name,
+            'description', d.description
+          )
+        ) FILTER (WHERE d.id IS NOT NULL) as deliverables
       FROM courses c
       LEFT JOIN workflow_instances wi ON c.id = wi.course_id AND wi.is_complete = false
       LEFT JOIN workflow_templates wt ON wi.workflow_template_id = wt.id
@@ -486,6 +493,8 @@ class CourseController {
       LEFT JOIN users u ON ca.user_id = u.id
       LEFT JOIN course_dependencies cd ON c.id = cd.course_id
       LEFT JOIN courses dc ON cd.depends_on_course_id = dc.id
+      LEFT JOIN course_deliverables cdeliv ON c.id = cdeliv.course_id
+      LEFT JOIN deliverables d ON cdeliv.deliverable_id = d.id
       WHERE c.id = $1
       GROUP BY wi.state_entered_at, wi.state_data, wt.name, wt.id, c.updated_at
     `, [id]);
@@ -500,7 +509,8 @@ class CourseController {
       workflow_template_name: additionalData.workflow_template_name,
       workflow_template_id: additionalData.workflow_template_id,
       assignments: additionalData.assignments || [],
-      dependencies: additionalData.dependencies || []
+      dependencies: additionalData.dependencies || [],
+      deliverables: additionalData.deliverables || []
     };
 
     logger.info('getCourseById workflow_state debug', {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
@@ -13,11 +13,6 @@ const MODALITIES = [
   { value: 'DAP', label: 'DAP (Digital Adoption Platform)' }
 ];
 
-const COURSE_TYPES = [
-  { value: 'standard', label: 'Standard' },
-  { value: 'compliance', label: 'Compliance' },
-  { value: 'certification', label: 'Certification' }
-];
 
 const PRIORITIES = [
   { value: 'low', label: 'Low', color: 'text-gray-600' },
@@ -25,6 +20,30 @@ const PRIORITIES = [
   { value: 'high', label: 'High', color: 'text-orange-600' },
   { value: 'critical', label: 'Critical', color: 'text-red-600' }
 ];
+
+// Helper function to filter deliverables by modality when API data isn't available
+function getDeliverablesForModality(modality, allDeliverables) {
+  if (!modality || !allDeliverables) return [];
+  
+  const modalityDeliverableMap = {
+    'WBT': ['Custom Content', 'Course Wrapper'],
+    'ILT/VLT': ['Facilitator Guide', 'Delivery Deck', 'Participation Guide'],
+    'Micro Learning': ['Microlearning'],
+    'SIMS': ['SIMS', 'QRG', 'Demo'],
+    'DAP': ['WalkMe']
+  };
+  
+  const allowedNames = modalityDeliverableMap[modality] || [];
+  return allDeliverables.filter(d => allowedNames.includes(d.name));
+}
+
+// Helper function to format date as ISO string with local timezone to prevent timezone shifts
+function formatDateForAPI(dateString) {
+  if (!dateString) return null;
+  // Create a date in the local timezone at noon to avoid timezone boundary issues
+  const date = new Date(dateString + 'T12:00:00');
+  return date.toISOString();
+}
 
 export default function CourseForm({ courseId = null }) {
   const navigate = useNavigate();
@@ -36,8 +55,8 @@ export default function CourseForm({ courseId = null }) {
     description: '',
     modality: '',
     deliverables: [],
-    type: 'standard',
     priority: 'medium',
+    status: 'pre_development',
     startDate: '',
     dueDate: '',
     estimatedHours: '',
@@ -74,16 +93,18 @@ export default function CourseForm({ courseId = null }) {
       const response = await courses.getModalityInfo(formData.modality);
       return response.data.data;
     },
-    enabled: Boolean(formData.modality && !isEditing),
+    enabled: Boolean(formData.modality),
     onSuccess: (data) => {
       setModalityInfo(data);
-      // For non-WBT modalities, auto-assign deliverables
-      if (formData.modality !== 'WBT') {
-        setFormData(prev => ({
-          ...prev,
-          deliverables: data.deliverables.map(d => d.id)
-        }));
-      }
+    }
+  });
+
+  // Fetch statuses for status selection
+  const { data: statusesData } = useQuery({
+    queryKey: ['statuses'],
+    queryFn: async () => {
+      const response = await statuses.getAll();
+      return response.data;
     }
   });
 
@@ -97,8 +118,8 @@ export default function CourseForm({ courseId = null }) {
         description: course.description || '',
         modality: course.modality || '',
         deliverables: course.deliverables?.map(d => d.id) || [],
-        type: course.type || 'standard',
         priority: course.priority || 'medium',
+        status: course.status || 'pre_development',
         startDate: course.start_date ? course.start_date.split('T')[0] : '',
         dueDate: course.due_date ? course.due_date.split('T')[0] : '',
         estimatedHours: course.estimated_hours || '',
@@ -206,16 +227,12 @@ export default function CourseForm({ courseId = null }) {
       return;
     }
 
-    // WBT must have at least one deliverable selected
-    if (formData.modality === 'WBT' && formData.deliverables.length === 0) {
-      toast.error('Please select at least one deliverable for WBT courses');
+    // All courses must have at least one deliverable selected
+    if (formData.deliverables.length === 0) {
+      toast.error('Please select at least one deliverable');
       return;
     }
 
-    if (!isEditing && !formData.dueDate) {
-      toast.error('Due date is required');
-      return;
-    }
 
     if (formData.dueDate && formData.startDate && new Date(formData.dueDate) < new Date(formData.startDate)) {
       toast.error('Due date cannot be earlier than start date');
@@ -226,20 +243,20 @@ export default function CourseForm({ courseId = null }) {
       title: formData.title.trim(),
       description: formData.description.trim(),
       modality: formData.modality,
-      type: formData.type,
       priority: formData.priority,
-      dueDate: formData.dueDate,
+      status: formData.status,
       workflowTemplateId: formData.workflowTemplateId
     };
 
-    // Add deliverables for WBT, others are auto-assigned
-    if (formData.modality === 'WBT') {
-      submitData.deliverables = formData.deliverables;
-    }
+    // Add deliverables for all modalities
+    submitData.deliverables = formData.deliverables;
 
     // Only add optional fields if they have values
     if (formData.startDate) {
-      submitData.startDate = formData.startDate;
+      submitData.startDate = formatDateForAPI(formData.startDate);
+    }
+    if (formData.dueDate) {
+      submitData.dueDate = formatDateForAPI(formData.dueDate);
     }
     if (formData.estimatedHours) {
       submitData.estimatedHours = parseInt(formData.estimatedHours);
@@ -257,10 +274,21 @@ export default function CourseForm({ courseId = null }) {
 
   const isLoading = createMutation.isPending || updateMutation.isPending;
 
-  // Get WBT deliverable options
-  const wbtDeliverables = deliverablesData?.filter(d => 
-    ['Custom Content', 'Course Wrapper'].includes(d.name)
-  ) || [];
+  // Get deliverable options for the selected modality (memoized to prevent infinite loops)
+  const availableDeliverables = useMemo(() => {
+    return modalityData?.deliverables || getDeliverablesForModality(formData.modality, deliverablesData);
+  }, [modalityData?.deliverables, formData.modality, deliverablesData]);
+
+  // Auto-select all deliverables for non-WBT modalities
+  useEffect(() => {
+    if (!isEditing && formData.modality && formData.modality !== 'WBT' && availableDeliverables.length > 0 && formData.deliverables.length === 0) {
+      const allDeliverableIds = availableDeliverables.map(d => d.id);
+      setFormData(prev => ({
+        ...prev,
+        deliverables: allDeliverableIds
+      }));
+    }
+  }, [availableDeliverables, formData.modality, formData.deliverables.length, isEditing]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -322,6 +350,46 @@ export default function CourseForm({ courseId = null }) {
                 />
               </div>
 
+              {/* Priority */}
+              <div>
+                <label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Priority
+                </label>
+                <select
+                  id="priority"
+                  value={formData.priority}
+                  onChange={(e) => handleInputChange('priority', e.target.value)}
+                  className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                >
+                  {PRIORITIES.map(priority => (
+                    <option key={priority.value} value={priority.value}>
+                      {priority.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status - Only show when editing */}
+              {isEditing && (
+                <div>
+                  <label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Course Status
+                  </label>
+                  <select
+                    id="status"
+                    value={formData.status}
+                    onChange={(e) => handleInputChange('status', e.target.value)}
+                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  >
+                    {(statusesData?.data || statusesData || []).map(status => (
+                      <option key={status.value} value={status.value}>
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Modality Selection */}
               <div>
                 <label htmlFor="modality" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -348,61 +416,22 @@ export default function CourseForm({ courseId = null }) {
                   </p>
                 )}
               </div>
-
-              {/* Type, Priority grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label htmlFor="type" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Course Type
-                  </label>
-                  <select
-                    id="type"
-                    value={formData.type}
-                    onChange={(e) => handleInputChange('type', e.target.value)}
-                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  >
-                    {COURSE_TYPES.map(type => (
-                      <option key={type.value} value={type.value}>
-                        {type.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label htmlFor="priority" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Priority
-                  </label>
-                  <select
-                    id="priority"
-                    value={formData.priority}
-                    onChange={(e) => handleInputChange('priority', e.target.value)}
-                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  >
-                    {PRIORITIES.map(priority => (
-                      <option key={priority.value} value={priority.value}>
-                        {priority.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
             </div>
           </div>
 
-          {/* Deliverables Section - WBT Only */}
-          {formData.modality === 'WBT' && !isEditing && (
+          {/* Deliverables Section - All Modalities */}
+          {formData.modality && !isEditing && availableDeliverables.length > 0 && (
             <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-6">
               <h2 className="text-lg font-medium text-gray-900 dark:text-white mb-6 flex items-center">
                 <Package className="h-5 w-5 mr-2" />
                 Deliverables Selection
               </h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Choose the deliverables for your WBT course:
+                Choose the deliverables for your course:
               </p>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {wbtDeliverables.map(deliverable => (
+                {availableDeliverables.map(deliverable => (
                   <div 
                     key={deliverable.id}
                     className={`relative border rounded-lg p-4 cursor-pointer transition-colors ${
@@ -514,7 +543,7 @@ export default function CourseForm({ courseId = null }) {
               <div>
                 <label htmlFor="dueDate" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   <AlertTriangle className="inline h-4 w-4 mr-1" />
-                  Due Date {!isEditing && '*'}
+                  Due Date
                 </label>
                 <input
                   type="date"
@@ -522,7 +551,6 @@ export default function CourseForm({ courseId = null }) {
                   value={formData.dueDate}
                   onChange={(e) => handleInputChange('dueDate', e.target.value)}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  required={!isEditing}
                 />
               </div>
 

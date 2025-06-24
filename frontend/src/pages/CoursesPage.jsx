@@ -1165,9 +1165,9 @@ function CoursesPage() {
                   </p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Type</h3>
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Modality</h3>
                   <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {selectedCourse.type?.replace('_', ' ') || 'Not set'}
+                    {selectedCourse.modality || 'Not set'}
                   </p>
                 </div>
                 <div>
