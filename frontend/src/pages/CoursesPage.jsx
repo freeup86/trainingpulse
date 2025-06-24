@@ -24,7 +24,7 @@ import {
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { courses, statuses } from '../lib/api';
+import { courses, statuses, phaseStatuses } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
 
 // Independent status definitions (separate from workflow)
@@ -1209,6 +1209,14 @@ function CoursePhases({ courseId }) {
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [tempStatus, setTempStatus] = useState({});
 
+  // Fetch phase statuses from database
+  const { data: phaseStatusesData } = useQuery({
+    queryKey: ['phase-statuses'],
+    queryFn: async () => {
+      const response = await phaseStatuses.getAll();
+      return response.data.data; // Extract the actual array from {success: true, data: [...]}
+    }
+  });
 
   // Close editing when clicking outside or pressing Escape
   useEffect(() => {
@@ -1263,7 +1271,12 @@ function CoursePhases({ courseId }) {
         return newStatus;
       });
       console.error('Phase update error:', error.response?.data);
-      toast.error(error.response?.data?.message || error.response?.data?.error || 'Failed to update phase status');
+      const errorMessage = error.response?.data?.error?.message || 
+                          error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          error.message || 
+                          'Failed to update phase status';
+      toast.error(typeof errorMessage === 'string' ? errorMessage : 'Failed to update phase status');
     }
   });
 
@@ -1294,7 +1307,10 @@ function CoursePhases({ courseId }) {
       subtaskId: subtaskId, // Use original ID (might be number)
       updateData: { 
         title: currentTask.title, // Include required field
-        status: newStatus 
+        status: newStatus,
+        isBlocking: currentTask.is_blocking || false,
+        weight: currentTask.weight || 1,
+        orderIndex: currentTask.order_index || currentTask.orderIndex || 0
       }
     });
   };
@@ -1322,11 +1338,21 @@ function CoursePhases({ courseId }) {
     );
   }
 
-  const statusOptions = [
-    { value: 'alpha_review', label: 'Alpha Review', color: 'text-blue-500 dark:text-blue-400' },
-    { value: 'beta_review', label: 'Beta Review', color: 'text-yellow-500 dark:text-yellow-400' },
-    { value: 'final', label: 'Final (Gold)', color: 'text-green-500 dark:text-green-400' }
-  ];
+  const statusOptions = phaseStatusesData ? 
+    phaseStatusesData
+      .filter(status => status.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map(status => ({
+        value: status.value,
+        label: status.label,
+        color: `${status.color} ${status.darkColor || ''}`
+      }))
+    : [
+      // Fallback options
+      { value: 'alpha_review', label: 'Alpha Review', color: 'text-blue-500 dark:text-blue-400' },
+      { value: 'beta_review', label: 'Beta Review', color: 'text-orange-500 dark:text-orange-400' },
+      { value: 'final', label: 'Final (Gold)', color: 'text-yellow-600 dark:text-yellow-500' }
+    ];
 
   return (
     <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
@@ -1340,11 +1366,17 @@ function CoursePhases({ courseId }) {
           const taskId = task.id || task.subtask_id || task.subtaskId || `temp-${index}`;
           const currentTaskStatus = tempStatus[taskId] || task.status;
           const currentStatus = statusOptions.find(opt => opt.value === currentTaskStatus) || statusOptions[0];
-          const StatusIcon = {
-            'alpha_review': PlayCircle,
-            'beta_review': AlertTriangle,
-            'final': CheckCircle
-          }[currentTaskStatus] || PlayCircle;
+          // Get icon from database phase status or fallback to PlayCircle
+          const statusConfig = phaseStatusesData?.find(s => s.value === currentTaskStatus);
+          const StatusIcon = statusConfig?.icon ? (
+            statusConfig.icon === 'PlayCircle' ? PlayCircle :
+            statusConfig.icon === 'AlertTriangle' ? AlertTriangle :
+            statusConfig.icon === 'CheckCircle' ? CheckCircle :
+            statusConfig.icon === 'Circle' ? Circle :
+            statusConfig.icon === 'Pause' ? Pause :
+            statusConfig.icon === 'Edit' ? Edit :
+            PlayCircle
+          ) : PlayCircle;
 
           const isEditing = editingTaskId === taskId;
           const isUpdating = updateSubtaskMutation.isLoading && updateSubtaskMutation.variables?.subtaskId === taskId;

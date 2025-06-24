@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { 
   ArrowLeft,
   Edit3,
+  Edit,
   Calendar,
   Clock,
   Users,
@@ -21,7 +22,7 @@ import {
   Plus,
   X
 } from 'lucide-react';
-import { courses, statuses } from '../lib/api';
+import { courses, statuses, phaseStatuses } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -123,6 +124,15 @@ export default function CourseDetailPage() {
     }
   });
 
+  // Fetch phase statuses
+  const { data: phaseStatusesData } = useQuery({
+    queryKey: ['phase-statuses'],
+    queryFn: async () => {
+      const response = await phaseStatuses.getAll();
+      return response.data.data; // Extract the actual array from {success: true, data: [...]}
+    }
+  });
+
   // Delete course mutation
   const deleteMutation = useMutation({
     mutationFn: () => courses.delete(id),
@@ -204,9 +214,22 @@ export default function CourseDetailPage() {
   };
 
   const handleStatusUpdate = (subtaskId, newStatus) => {
+    // Find the subtask to get all its current data
+    const subtask = course.subtasks?.find(s => s.id === subtaskId);
+    if (!subtask) {
+      toast.error('Subtask not found');
+      return;
+    }
+    
     updateSubtaskMutation.mutate({
       subtaskId,
-      updateData: { status: newStatus }
+      updateData: { 
+        title: subtask.title,
+        status: newStatus,
+        isBlocking: subtask.is_blocking || subtask.isBlocking || false,
+        weight: subtask.weight || 1,
+        orderIndex: subtask.order_index || subtask.orderIndex || 0
+      }
     });
   };
 
@@ -437,11 +460,17 @@ export default function CourseDetailPage() {
                           .sort((a, b) => a.order_index - b.order_index)
                           .map((subtask, index) => {
                             const getStatusIcon = (status) => {
+                              const statusConfig = phaseStatusesData?.find(s => s.value === status);
+                              if (statusConfig) {
+                                return <PlayCircle className={`h-4 w-4 ${statusConfig.color}`} />;
+                              }
+                              
+                              // Fallback for hardcoded statuses
                               switch (status) {
                                 case 'final':
-                                  return <CheckCircle className="h-4 w-4 text-green-500" />;
+                                  return <PlayCircle className="h-4 w-4 text-yellow-600" />;
                                 case 'beta_review':
-                                  return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
+                                  return <PlayCircle className="h-4 w-4 text-orange-500" />;
                                 case 'alpha_review':
                                   return <PlayCircle className="h-4 w-4 text-blue-500" />;
                                 default:
@@ -450,11 +479,19 @@ export default function CourseDetailPage() {
                             };
 
                             const getStatusColor = (status) => {
+                              const statusConfig = phaseStatusesData?.find(s => s.value === status);
+                              if (statusConfig) {
+                                // Convert text color to background color for badges
+                                const baseColor = statusConfig.color.replace('text-', '').replace('-500', '').replace('-600', '');
+                                return `bg-${baseColor}-100 text-${baseColor}-800 dark:bg-${baseColor}-900/20 dark:text-${baseColor}-300`;
+                              }
+                              
+                              // Fallback for hardcoded statuses
                               switch (status) {
                                 case 'final':
-                                  return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+                                  return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400';
                                 case 'beta_review':
-                                  return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+                                  return 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300';
                                 case 'alpha_review':
                                   return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
                                 default:
@@ -484,9 +521,23 @@ export default function CourseDetailPage() {
                                               onChange={(e) => handleStatusChange(subtask.id, e.target.value)}
                                               className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                                             >
-                                              <option value="alpha_review">Alpha Review</option>
-                                              <option value="beta_review">Beta Review</option>
-                                              <option value="final">Final (Gold)</option>
+                                              {phaseStatusesData ? 
+                                                phaseStatusesData
+                                                  .filter(status => status.isActive)
+                                                  .sort((a, b) => a.sortOrder - b.sortOrder)
+                                                  .map(status => (
+                                                    <option key={status.value} value={status.value}>
+                                                      {status.label}
+                                                    </option>
+                                                  ))
+                                                :
+                                                // Fallback options
+                                                <>
+                                                  <option value="alpha_review">Alpha Review</option>
+                                                  <option value="beta_review">Beta Review</option>
+                                                  <option value="final">Final (Gold)</option>
+                                                </>
+                                              }
                                             </select>
                                             <button
                                               onClick={() => handleStatusConfirm(subtask.id)}
@@ -508,7 +559,8 @@ export default function CourseDetailPage() {
                                             onClick={() => handleStatusClick(subtask.id, subtask.status)}
                                             className={`text-xs px-2.5 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity ${getStatusColor(subtask.status)}`}
                                           >
-                                            {subtask.status === 'final' ? 'Final (Gold)' : subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                            {phaseStatusesData?.find(s => s.value === subtask.status)?.label || 
+                                             (subtask.status === 'final' ? 'Final (Gold)' : subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()))}
                                           </button>
                                         )}
                                       </div>

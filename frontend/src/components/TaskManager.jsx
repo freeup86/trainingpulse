@@ -1,5 +1,5 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { 
   Plus, 
@@ -10,18 +10,38 @@ import {
   PlayCircle, 
   Pause,
   AlertTriangle,
-  Save
+  Save,
+  Edit
 } from 'lucide-react';
-import { courses } from '../lib/api';
-
-const TASK_STATUSES = [
-  { value: 'alpha_review', label: 'Alpha Review', icon: PlayCircle, color: 'text-blue-500' },
-  { value: 'beta_review', label: 'Beta Review', icon: AlertTriangle, color: 'text-yellow-500' },
-  { value: 'final', label: 'Final (Gold)', icon: CheckCircle, color: 'text-green-500' }
-];
+import { courses, phaseStatuses } from '../lib/api';
 
 const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false, showTitle = true }, ref) => {
   const queryClient = useQueryClient();
+  
+  // Fetch phase statuses from database
+  const { data: phaseStatusesData } = useQuery({
+    queryKey: ['phase-statuses'],
+    queryFn: async () => {
+      const response = await phaseStatuses.getAll();
+      return response.data.data; // Extract the actual array from {success: true, data: [...]}
+    }
+  });
+
+  // Convert database statuses to the format expected by the component
+  const TASK_STATUSES = phaseStatusesData ? phaseStatusesData
+    .filter(status => status.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map(status => ({
+      value: status.value,
+      label: status.label,
+      icon: PlayCircle, // For now, keep using PlayCircle for all
+      color: status.color
+    })) : [
+    // Fallback to hardcoded statuses if database is unavailable
+    { value: 'alpha_review', label: 'Alpha Review', icon: PlayCircle, color: 'text-blue-500' },
+    { value: 'beta_review', label: 'Beta Review', icon: PlayCircle, color: 'text-orange-500' },
+    { value: 'final', label: 'Final (Gold)', icon: PlayCircle, color: 'text-yellow-600' }
+  ];
   const [tasks, setTasks] = useState(
     (initialTasks || []).map(task => ({
       id: task.id,
@@ -99,10 +119,15 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
   });
 
   const addTask = () => {
+    // Find the default status from database, fallback to first available or 'alpha_review'
+    const defaultStatus = phaseStatusesData?.find(s => s.isDefault)?.value || 
+                         TASK_STATUSES[0]?.value || 
+                         'alpha_review';
+    
     const newTask = {
       id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       title: '',
-      status: 'alpha_review',
+      status: defaultStatus,
       isBlocking: false,
       weight: 1,
       orderIndex: tasks.length,
@@ -126,7 +151,13 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     try {
       await updateSubtaskMutation.mutateAsync({
         subtaskId: task.id,
-        updateData: { status: newStatus }
+        updateData: { 
+          title: task.title,
+          status: newStatus,
+          isBlocking: task.isBlocking,
+          weight: task.weight,
+          orderIndex: task.orderIndex
+        }
       });
     } catch (error) {
       // Error is handled by the mutation
@@ -219,11 +250,19 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
   };
 
   const getStatusBadgeColor = (status) => {
+    const statusConfig = phaseStatusesData?.find(s => s.value === status);
+    if (statusConfig) {
+      // Convert text color to background color for badges
+      const baseColor = statusConfig.color.replace('text-', '').replace('-500', '');
+      return `bg-${baseColor}-100 text-${baseColor}-800 dark:bg-${baseColor}-900/20 dark:text-${baseColor}-300`;
+    }
+    
+    // Fallback for hardcoded statuses or unknown statuses
     switch (status) {
       case 'final':
-        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400';
       case 'beta_review':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+        return 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300';
       case 'alpha_review':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300';
       default:

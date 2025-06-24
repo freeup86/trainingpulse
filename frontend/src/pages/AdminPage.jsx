@@ -20,13 +20,14 @@ import {
   Eye,
   EyeOff,
   Lock,
-  UserCheck
+  UserCheck,
+  ListTodo
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
-import { statuses, users, roles, permissions } from '../lib/api';
+import { statuses, users, roles, permissions, phaseStatuses } from '../lib/api';
 
 // Status icons mapping
 const STATUS_ICONS = {
@@ -88,6 +89,22 @@ export default function AdminPage() {
   });
   const [showPassword, setShowPassword] = useState(false);
 
+  // Phase status management state
+  const [editingPhaseStatus, setEditingPhaseStatus] = useState(null);
+  const [isCreatingPhaseStatus, setIsCreatingPhaseStatus] = useState(false);
+  const [phaseStatusFormData, setPhaseStatusFormData] = useState({
+    value: '',
+    label: '',
+    description: '',
+    color: 'text-blue-500',
+    darkColor: 'dark:text-blue-400',
+    icon: 'PlayCircle',
+    sortOrder: 1,
+    isActive: true,
+    isDefault: false,
+    completionPercentage: 0
+  });
+
   // Fetch statuses (always call hooks before any returns)
   const { data: statusesData, isLoading, error } = useQuery({
     queryKey: ['admin-statuses'],
@@ -144,6 +161,59 @@ export default function AdminPage() {
     }
   });
 
+  // Phase Status queries and mutations
+  const { data: phaseStatusesData, isLoading: phaseStatusesLoading, error: phaseStatusesError } = useQuery({
+    queryKey: ['admin-phase-statuses'],
+    queryFn: async () => {
+      const response = await phaseStatuses.getAll({ includeInactive: 'true' });
+      return response.data.data; // Extract the actual array from {success: true, data: [...]}
+    }
+  });
+
+  const createPhaseStatusMutation = useMutation({
+    mutationFn: async (statusData) => {
+      const response = await phaseStatuses.create(statusData);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-phase-statuses']);
+      toast.success('Phase status created successfully');
+      resetPhaseStatusForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to create phase status: ' + (error.response?.data?.message || error.message));
+    }
+  });
+
+  const updatePhaseStatusMutation = useMutation({
+    mutationFn: async ({ id, data }) => {
+      const response = await phaseStatuses.update(id, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-phase-statuses']);
+      toast.success('Phase status updated successfully');
+      resetPhaseStatusForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to update phase status: ' + (error.response?.data?.message || error.message));
+    }
+  });
+
+  const deletePhaseStatusMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await phaseStatuses.delete(id);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-phase-statuses']);
+      toast.success('Phase status deleted successfully');
+    },
+    onError: (error) => {
+      toast.error('Failed to delete phase status: ' + (error.response?.data?.message || error.message));
+    }
+  });
+
   const resetForm = () => {
     setFormData({
       value: '',
@@ -153,6 +223,23 @@ export default function AdminPage() {
     });
     setEditingStatus(null);
     setIsCreating(false);
+  };
+
+  const resetPhaseStatusForm = () => {
+    setPhaseStatusFormData({
+      value: '',
+      label: '',
+      description: '',
+      color: 'text-blue-500',
+      darkColor: 'dark:text-blue-400',
+      icon: 'PlayCircle',
+      sortOrder: 1,
+      isActive: true,
+      isDefault: false,
+      completionPercentage: 0
+    });
+    setEditingPhaseStatus(null);
+    setIsCreatingPhaseStatus(false);
   };
 
   // Fetch users
@@ -355,7 +442,60 @@ export default function AdminPage() {
     }
   };
 
-  const isLoading_mutations = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
+  // Phase Status Handler Functions
+  const handleEditPhaseStatus = (phaseStatus) => {
+    setPhaseStatusFormData({
+      value: phaseStatus.value,
+      label: phaseStatus.label,
+      description: phaseStatus.description || '',
+      color: phaseStatus.color,
+      darkColor: phaseStatus.darkColor || '',
+      icon: phaseStatus.icon,
+      sortOrder: phaseStatus.sortOrder,
+      isActive: phaseStatus.isActive,
+      isDefault: phaseStatus.isDefault,
+      completionPercentage: phaseStatus.completionPercentage || 0
+    });
+    setEditingPhaseStatus(phaseStatus);
+    setIsCreatingPhaseStatus(false);
+    // Scroll to form
+    setTimeout(() => {
+      document.getElementById('phase-status-form')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
+
+  const handleCreatePhaseStatus = () => {
+    resetPhaseStatusForm();
+    setIsCreatingPhaseStatus(true);
+    // Scroll to form
+    setTimeout(() => {
+      document.getElementById('phase-status-form')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
+
+  const handlePhaseStatusSubmit = (e) => {
+    e.preventDefault();
+    
+    if (!phaseStatusFormData.value.trim() || !phaseStatusFormData.label.trim()) {
+      toast.error('Value and label are required');
+      return;
+    }
+
+    if (editingPhaseStatus) {
+      updatePhaseStatusMutation.mutate({ id: editingPhaseStatus.id, data: phaseStatusFormData });
+    } else {
+      createPhaseStatusMutation.mutate(phaseStatusFormData);
+    }
+  };
+
+  const handleDeletePhaseStatus = (phaseStatus) => {
+    if (window.confirm(`Are you sure you want to delete the "${phaseStatus.label}" phase status?`)) {
+      deletePhaseStatusMutation.mutate(phaseStatus.id);
+    }
+  };
+
+  const isLoading_mutations = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending ||
+    createPhaseStatusMutation.isPending || updatePhaseStatusMutation.isPending || deletePhaseStatusMutation.isPending;
 
   // Check if user has admin access (after all hooks)
   const hasAdminAccess = can.manageSettings || can.manageRoles || can.managePermissions || can.viewUsers;
@@ -442,6 +582,19 @@ export default function AdminPage() {
             >
               <Tag className="h-4 w-4 mr-2" />
               Course Statuses
+            </button>
+          )}
+          {can.manageSettings && (
+            <button
+              onClick={() => setActiveTab('phase-statuses')}
+              className={`${
+                activeTab === 'phase-statuses'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center`}
+            >
+              <ListTodo className="h-4 w-4 mr-2" />
+              Phase Statuses
             </button>
           )}
           {can.viewUsers && (
@@ -850,6 +1003,265 @@ export default function AdminPage() {
                 <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No users found</p>
                 <p className="text-sm">Click "Add User" to create your first user account</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'phase-statuses' && can.manageSettings && (
+        /* Phase Status Management */
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <ListTodo className="h-5 w-5 mr-2" />
+              Phase Status Management
+            </CardTitle>
+            <CardDescription>
+              Configure phase statuses for course development phases. These statuses control the workflow progression of individual phases.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {phaseStatusesError ? (
+              <div className="text-red-500">
+                Error loading phase statuses: {phaseStatusesError.message}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Create/Edit Form - Only show when creating or editing */}
+                {(isCreatingPhaseStatus || editingPhaseStatus) && (
+                  <div id="phase-status-form" className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                  <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-white">
+                    {isCreatingPhaseStatus ? 'Create New' : editingPhaseStatus ? 'Edit' : 'Create'} Phase Status
+                  </h3>
+                  <form onSubmit={handlePhaseStatusSubmit} className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Value *
+                        </label>
+                        <input
+                          type="text"
+                          value={phaseStatusFormData.value}
+                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, value: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="e.g., alpha_review"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Label *
+                        </label>
+                        <input
+                          type="text"
+                          value={phaseStatusFormData.label}
+                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, label: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="e.g., Alpha Review"
+                          required
+                        />
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Description
+                      </label>
+                      <textarea
+                        value={phaseStatusFormData.description}
+                        onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, description: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        placeholder="Optional description of this phase status"
+                        rows="2"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Color *
+                        </label>
+                        <input
+                          type="text"
+                          value={phaseStatusFormData.color}
+                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, color: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="e.g., text-blue-500"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Dark Color
+                        </label>
+                        <input
+                          type="text"
+                          value={phaseStatusFormData.darkColor}
+                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, darkColor: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="e.g., dark:text-blue-400"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Icon
+                        </label>
+                        <input
+                          type="text"
+                          value={phaseStatusFormData.icon}
+                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, icon: e.target.value }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="e.g., PlayCircle"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Sort Order
+                        </label>
+                        <input
+                          type="number"
+                          value={phaseStatusFormData.sortOrder}
+                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, sortOrder: parseInt(e.target.value) || 1 }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          min="1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Completion %
+                        </label>
+                        <input
+                          type="number"
+                          value={phaseStatusFormData.completionPercentage}
+                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, completionPercentage: parseInt(e.target.value) || 0 }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          min="0"
+                          max="100"
+                          placeholder="0-100"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-4">
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={phaseStatusFormData.isActive}
+                            onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, isActive: e.target.checked }))}
+                            className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                          />
+                          <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Active</span>
+                        </label>
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={phaseStatusFormData.isDefault}
+                            onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, isDefault: e.target.checked }))}
+                            className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                          />
+                          <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Default</span>
+                        </label>
+                      </div>
+
+                    <div className="flex space-x-2">
+                      <Button
+                        type="submit"
+                        disabled={createPhaseStatusMutation.isPending || updatePhaseStatusMutation.isPending}
+                      >
+                        {createPhaseStatusMutation.isPending || updatePhaseStatusMutation.isPending ? 'Saving...' : 
+                         editingPhaseStatus ? 'Update Phase Status' : 'Create Phase Status'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={resetPhaseStatusForm}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                  </div>
+                )}
+
+                {/* Phase Status List */}
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-white">Existing Phase Statuses</h3>
+                    <Button onClick={handleCreatePhaseStatus}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Phase Status
+                    </Button>
+                  </div>
+
+                  {phaseStatusesLoading ? (
+                    <div className="text-center py-4 text-gray-600 dark:text-gray-300">Loading phase statuses...</div>
+                  ) : phaseStatusesData && phaseStatusesData.length > 0 ? (
+                    <div className="space-y-2">
+                      {phaseStatusesData
+                        .sort((a, b) => a.sortOrder - b.sortOrder)
+                        .map((phaseStatus) => (
+                        <div key={phaseStatus.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                          <div className="flex items-center space-x-4">
+                            <div className={`h-3 w-3 rounded-full ${phaseStatus.color.replace('text-', 'bg-')}`}></div>
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="font-medium text-gray-900 dark:text-white">{phaseStatus.label}</span>
+                                <code className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2 py-1 rounded">
+                                  {phaseStatus.value}
+                                </code>
+                                {phaseStatus.isDefault && (
+                                  <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300 px-2 py-1 rounded">
+                                    Default
+                                  </span>
+                                )}
+                                {!phaseStatus.isActive && (
+                                  <span className="text-xs bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300 px-2 py-1 rounded">
+                                    Inactive
+                                  </span>
+                                )}
+                              </div>
+                              {phaseStatus.description && (
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                  {phaseStatus.description}
+                                </p>
+                              )}
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                Order: {phaseStatus.sortOrder} | Icon: {phaseStatus.icon} | Completion: {phaseStatus.completionPercentage || 0}%
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleEditPhaseStatus(phaseStatus)}
+                            >
+                              <Edit3 className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeletePhaseStatus(phaseStatus)}
+                              className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                      <ListTodo className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No phase statuses configured</p>
+                      <p className="text-sm">Click "Add Phase Status" to create your first phase status</p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </CardContent>

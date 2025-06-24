@@ -416,4 +416,24 @@ export const userPermissions = {
     api.get('/user-permissions/role'),
 };
 
+export const phaseStatuses = {
+  getAll: (params = {}) =>
+    api.get('/phase-statuses', { params }),
+  
+  getById: (id) =>
+    api.get(`/phase-statuses/${id}`),
+  
+  create: (data) =>
+    api.post('/phase-statuses', data),
+  
+  update: (id, data) =>
+    api.put(`/phase-statuses/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/phase-statuses/${id}`),
+  
+  reorder: (statusIds) =>
+    api.post('/phase-statuses/reorder', { statusIds }),
+};
+
 export default api;

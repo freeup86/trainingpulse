@@ -27,6 +27,7 @@ const workflowRoutes = require('./routes/workflowRoutes');
 const settingsRoutes = require('./routes/settings');
 const statusRoutes = require('./routes/statusRoutes');
 const roleRoutes = require('./routes/roleRoutes');
+const phaseStatusRoutes = require('./routes/phaseStatusRoutes');
 const permissionRoutes = require('./routes/permissionRoutes');
 const userPermissionRoutes = require('./routes/userPermissionRoutes');
 
@@ -137,6 +138,7 @@ app.use(`/api/${API_VERSION}/bulk`, authenticate, bulkLimiter, bulkRoutes);
 app.use(`/api/${API_VERSION}/notifications`, authenticate, notificationRoutes);
 app.use(`/api/${API_VERSION}/settings`, authenticate, settingsRoutes);
 app.use(`/api/${API_VERSION}/statuses`, authenticate, statusRoutes);
+app.use(`/api/${API_VERSION}/phase-statuses`, authenticate, phaseStatusRoutes);
 app.use(`/api/${API_VERSION}/roles`, authenticate, roleRoutes);
 app.use(`/api/${API_VERSION}/permissions`, authenticate, permissionRoutes);
 app.use(`/api/${API_VERSION}/user-permissions`, authenticate, userPermissionRoutes);

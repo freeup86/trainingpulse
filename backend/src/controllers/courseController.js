@@ -51,20 +51,40 @@ const updateCourseSchema = Joi.object({
   metadata: Joi.object().max(20).optional()
 });
 
-const subtaskSchema = Joi.object({
-  title: Joi.string().min(1).max(255).required().trim(),
-  status: Joi.string().valid('pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final').default('pending'),
-  isBlocking: Joi.boolean().default(false),
-  weight: Joi.number().integer().min(1).max(100).default(1),
-  orderIndex: Joi.number().integer().min(1).optional(),
-  assignedUserId: Joi.number().integer().positive().optional()
-});
+// Dynamic subtask schema that will be updated with valid phase statuses
+const createSubtaskSchema = (validStatuses = ['pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
+  return Joi.object({
+    title: Joi.string().min(1).max(255).required().trim(),
+    status: Joi.string().valid(...validStatuses).default('pending'),
+    isBlocking: Joi.boolean().default(false),
+    weight: Joi.number().integer().min(1).max(100).default(1),
+    orderIndex: Joi.number().integer().min(1).optional(),
+    assignedUserId: Joi.number().integer().positive().optional()
+  });
+};
 
 class CourseController {
   constructor() {
     this.statusAggregator = new StatusAggregator();
     this.subtaskService = new SubtaskService();
     this.notificationService = new NotificationService();
+  }
+
+  // Get valid phase statuses from database
+  async getValidPhaseStatuses() {
+    try {
+      const result = await query(`
+        SELECT value FROM phase_statuses 
+        WHERE is_active = true 
+        ORDER BY sort_order ASC
+      `);
+      const statuses = result.rows.map(row => row.value);
+      // Include legacy statuses for backward compatibility
+      return [...new Set([...statuses, 'pending', 'in_progress', 'completed', 'on_hold'])];
+    } catch (error) {
+      // Fallback to hardcoded statuses if phase_statuses table doesn't exist
+      return ['pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final'];
+    }
   }
 
   /**
@@ -704,6 +724,10 @@ class CourseController {
   createSubtask = asyncHandler(async (req, res) => {
     const { id: courseId } = req.params;
 
+    // Get valid phase statuses and create dynamic schema
+    const validStatuses = await this.getValidPhaseStatuses();
+    const subtaskSchema = createSubtaskSchema(validStatuses);
+
     // Validate input
     const { error, value } = subtaskSchema.validate(req.body);
     if (error) {
@@ -726,6 +750,10 @@ class CourseController {
    */
   updateSubtask = asyncHandler(async (req, res) => {
     const { subtaskId } = req.params;
+
+    // Get valid phase statuses and create dynamic schema
+    const validStatuses = await this.getValidPhaseStatuses();
+    const subtaskSchema = createSubtaskSchema(validStatuses);
 
     // Validate input
     const { error, value } = subtaskSchema.validate(req.body);
