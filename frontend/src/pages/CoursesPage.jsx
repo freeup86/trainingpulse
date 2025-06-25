@@ -1348,13 +1348,19 @@ function CoursePhases({ courseId }) {
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries(['course', courseId]);
       queryClient.invalidateQueries(['courses']);
-      setEditingTaskId(null);
-      setTempStatus(prev => {
-        const newStatus = { ...prev };
-        delete newStatus[variables.subtaskId];
-        return newStatus;
-      });
-      toast.success('Phase status updated successfully');
+      
+      // Only close status editing if we're updating status
+      if (variables.updateData.status !== undefined) {
+        setEditingTaskId(null);
+        setTempStatus(prev => {
+          const newStatus = { ...prev };
+          delete newStatus[variables.subtaskId];
+          return newStatus;
+        });
+        toast.success('Phase status updated successfully');
+      }
+      
+      // Assignment updates are handled in the specific callback
     },
     onError: (error, variables) => {
       // Revert temp status on error
@@ -1482,12 +1488,23 @@ function CoursePhases({ courseId }) {
   const handleAssignmentConfirm = (subtaskId) => {
     const newAssignedUserIds = tempAssignment[subtaskId] || [];
     
+    console.log('handleAssignmentConfirm called:', { subtaskId, newAssignedUserIds });
+    
     updateSubtaskMutation.mutate({
       subtaskId,
       updateData: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
+    }, {
+      onSuccess: () => {
+        console.log('Assignment update successful');
+        setEditingAssignmentId(null);
+        setTempAssignment({});
+        toast.success('Assignments updated successfully');
+      },
+      onError: (error) => {
+        console.error('Assignment update failed:', error);
+        toast.error('Failed to update assignments');
+      }
     });
-    setEditingAssignmentId(null);
-    setTempAssignment({});
   };
 
   const handleAssignmentCancel = () => {
@@ -1651,9 +1668,9 @@ function CoursePhases({ courseId }) {
                 {/* Assignees Column */}
                 <div className="w-40 ml-2 text-xs">
                   {editingAssignmentId === taskId ? (
-                    <div className="flex items-center space-x-2">
-                      <div className="relative">
-                        <div className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-2 max-h-32 overflow-y-auto min-w-36">
+                    <div className="relative">
+                      <div className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-2 shadow-lg z-50">
+                        <div className="max-h-32 overflow-y-auto min-w-36 mb-2">
                           {(usersData || []).map(user => {
                             const isSelected = (tempAssignment[taskId] || []).includes(user.id);
                             return (
@@ -1661,7 +1678,10 @@ function CoursePhases({ courseId }) {
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
-                                  onChange={() => handleAssignmentToggle(taskId, user.id)}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    handleAssignmentToggle(taskId, user.id);
+                                  }}
                                   className="h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                                 />
                                 <span className="text-gray-900 dark:text-white truncate">{user.name}</span>
@@ -1669,27 +1689,37 @@ function CoursePhases({ courseId }) {
                             );
                           })}
                         </div>
+                        <div className="flex justify-end space-x-1 pt-1 border-t border-gray-200 dark:border-gray-600">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              console.log('Confirm button clicked for task:', taskId);
+                              handleAssignmentConfirm(taskId);
+                            }}
+                            disabled={updateSubtaskMutation.isLoading}
+                            className="flex items-center justify-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50 cursor-pointer"
+                            title="Save assignments"
+                          >
+                            <CheckCircle className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              console.log('Cancel button clicked');
+                              handleAssignmentCancel();
+                            }}
+                            disabled={updateSubtaskMutation.isLoading}
+                            className="flex items-center justify-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50 cursor-pointer"
+                            title="Cancel editing"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAssignmentConfirm(taskId);
-                        }}
-                        disabled={updateSubtaskMutation.isLoading}
-                        className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
-                      >
-                        <CheckCircle className="h-3 w-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAssignmentCancel();
-                        }}
-                        disabled={updateSubtaskMutation.isLoading}
-                        className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
                     </div>
                   ) : (
                     <button
