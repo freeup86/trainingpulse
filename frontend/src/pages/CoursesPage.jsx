@@ -720,7 +720,7 @@ function CoursesPage() {
                         Due Date
                       </th>
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Assigned
+                        Owner
                       </th>
                       <th scope="col" className="relative px-6 py-3">
                         <span className="sr-only">Actions</span>
@@ -857,15 +857,15 @@ function CoursesPage() {
                               )}
                             </td>
 
-                            {/* Assigned Column */}
+                            {/* Owner Column */}
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                              {course.assignments && course.assignments.length > 0 ? (
+                              {course.owner ? (
                                 <div className="flex items-center">
                                   <Users className="h-4 w-4 mr-1 text-gray-400" />
-                                  <span>{course.assignments.length}</span>
+                                  <span>{course.owner.name}</span>
                                 </div>
                               ) : (
-                                <span className="text-gray-400">0</span>
+                                <span className="text-gray-400">—</span>
                               )}
                             </td>
 
@@ -934,7 +934,7 @@ function CoursesPage() {
                     Due Date
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Assigned
+                    Owner
                   </th>
                   <th scope="col" className="relative px-6 py-3">
                     <span className="sr-only">Actions</span>
@@ -1071,18 +1071,6 @@ function CoursesPage() {
                           )}
                         </td>
 
-                        {/* Assigned Column */}
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          {course.assignments && course.assignments.length > 0 ? (
-                            <div className="flex items-center">
-                              <Users className="h-4 w-4 mr-1 text-gray-400" />
-                              <span>{course.assignments.length}</span>
-                            </div>
-                          ) : (
-                            <span className="text-gray-400">0</span>
-                          )}
-                        </td>
-
                         {/* Actions Column */}
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <div className="flex items-center justify-end space-x-2">
@@ -1168,6 +1156,12 @@ function CoursesPage() {
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Modality</h3>
                   <p className="mt-1 text-sm text-gray-900 dark:text-white">
                     {selectedCourse.modality || 'Not set'}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Owner</h3>
+                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                    {selectedCourse.owner ? selectedCourse.owner.name : 'Not assigned'}
                   </p>
                 </div>
                 <div>

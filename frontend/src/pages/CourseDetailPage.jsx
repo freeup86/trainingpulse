@@ -23,7 +23,7 @@ import {
   X,
   Package
 } from 'lucide-react';
-import { courses, statuses, phaseStatuses } from '../lib/api';
+import { courses, statuses, phaseStatuses, users } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
@@ -110,6 +110,8 @@ export default function CourseDetailPage() {
   const [editingPhaseId, setEditingPhaseId] = useState(null);
   const [tempPhaseStatus, setTempPhaseStatus] = useState({});
   const [isEditingCourseStatus, setIsEditingCourseStatus] = useState(false);
+  const [editingAssignmentId, setEditingAssignmentId] = useState(null);
+  const [tempAssignment, setTempAssignment] = useState({});
 
   const { data: courseData, isLoading, error } = useQuery({
     queryKey: ['course', id],
@@ -132,6 +134,15 @@ export default function CourseDetailPage() {
     queryFn: async () => {
       const response = await phaseStatuses.getAll();
       return response.data.data; // Extract the actual array from {success: true, data: [...]}
+    }
+  });
+
+  // Fetch users for assignment
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const response = await users.getAll();
+      return response.data.data.users; // Extract users array
     }
   });
 
@@ -276,6 +287,41 @@ export default function CourseDetailPage() {
     setTempPhaseStatus({});
   };
 
+  // Assignment handling functions
+  const handleAssignmentClick = (subtaskId, currentAssignedUserIds) => {
+    setEditingAssignmentId(subtaskId);
+    setTempAssignment({ [subtaskId]: currentAssignedUserIds || [] });
+  };
+
+  const handleAssignmentToggle = (subtaskId, userId) => {
+    const currentAssignments = tempAssignment[subtaskId] || [];
+    const isAssigned = currentAssignments.includes(userId);
+    
+    let newAssignments;
+    if (isAssigned) {
+      newAssignments = currentAssignments.filter(id => id !== userId);
+    } else {
+      newAssignments = [...currentAssignments, userId];
+    }
+    
+    setTempAssignment({ [subtaskId]: newAssignments });
+  };
+
+  const handleAssignmentConfirm = (subtaskId) => {
+    const newAssignedUserIds = tempAssignment[subtaskId] || [];
+    updateSubtaskMutation.mutate({
+      subtaskId,
+      data: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
+    });
+    setEditingAssignmentId(null);
+    setTempAssignment({});
+  };
+
+  const handleAssignmentCancel = () => {
+    setEditingAssignmentId(null);
+    setTempAssignment({});
+  };
+
   if (isLoading) {
     return (
       <div className="p-6">
@@ -398,6 +444,16 @@ export default function CourseDetailPage() {
                     <Badge className={getPriorityColor(course.priority)}>
                       {course.priority}
                     </Badge>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Owner</h4>
+                    <div className="flex items-center space-x-2">
+                      <Users className="h-4 w-4 text-gray-400" />
+                      <span className="text-gray-700 dark:text-gray-300">
+                        {course.owner ? course.owner.name : 'Not assigned'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -615,7 +671,7 @@ export default function CourseDetailPage() {
                                           ({getCompletionPercentage(subtask.status)}% complete)
                                         </span>
                                       </div>
-                                      {(subtask.start_date || subtask.finish_date) && (
+                                      {(subtask.start_date || subtask.finish_date || subtask.assignedUser) && (
                                         <div className="flex items-center space-x-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
                                           {subtask.start_date && (
                                             <div className="flex items-center space-x-1">
@@ -627,6 +683,14 @@ export default function CourseDetailPage() {
                                             <div className="flex items-center space-x-1">
                                               <CheckCircle className="h-3 w-3" />
                                               <span>Finished: {new Date(subtask.finish_date).toLocaleDateString()}</span>
+                                            </div>
+                                          )}
+                                          {subtask.assignedUsers && subtask.assignedUsers.length > 0 && (
+                                            <div className="flex items-center space-x-1">
+                                              <Users className="h-3 w-3" />
+                                              <span>
+                                                Assigned to: {subtask.assignedUsers.map(user => user.name).join(', ')}
+                                              </span>
                                             </div>
                                           )}
                                         </div>
@@ -677,8 +741,62 @@ export default function CourseDetailPage() {
                                             onClick={() => handleStatusClick(subtask.id, subtask.status)}
                                             className={`text-xs px-2.5 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity ${getStatusColor(subtask.status)}`}
                                           >
-                                            {phaseStatusesData?.find(s => s.value === subtask.status)?.label || 
-                                             (subtask.status === 'final' ? 'Final (Gold)' : subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()))}
+                                            {(() => {
+                                              const foundStatus = phaseStatusesData?.find(s => s.value === subtask.status);
+                                              
+                                              return foundStatus?.label || 
+                                                     (subtask.status === 'final' ? 'Final (Gold)' : subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()));
+                                            })()}
+                                          </button>
+                                        )}
+                                        {/* Assignment Section */}
+                                        {editingAssignmentId === subtask.id ? (
+                                          <div className="flex items-center space-x-2">
+                                            <div className="relative">
+                                              <div className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-2 max-h-32 overflow-y-auto min-w-48">
+                                                {(usersData || []).map(user => {
+                                                  const isSelected = (tempAssignment[subtask.id] || []).includes(user.id);
+                                                  return (
+                                                    <label key={user.id} className="flex items-center space-x-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-600 p-1 rounded cursor-pointer">
+                                                      <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => handleAssignmentToggle(subtask.id, user.id)}
+                                                        className="h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                                      />
+                                                      <span className="text-gray-900 dark:text-white">{user.name}</span>
+                                                    </label>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                            <button
+                                              onClick={() => handleAssignmentConfirm(subtask.id)}
+                                              disabled={updateSubtaskMutation.isPending}
+                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
+                                            >
+                                              <CheckCircle className="h-3 w-3" />
+                                            </button>
+                                            <button
+                                              onClick={handleAssignmentCancel}
+                                              disabled={updateSubtaskMutation.isPending}
+                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
+                                            >
+                                              <X className="h-3 w-3" />
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleAssignmentClick(subtask.id, (subtask.assignedUsers || []).map(u => u.id))}
+                                            className="text-xs px-2.5 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                                            title={subtask.assignedUsers && subtask.assignedUsers.length > 0 ? `Assigned to ${subtask.assignedUsers.map(u => u.name).join(', ')}` : 'Click to assign'}
+                                          >
+                                            <Users className="h-3 w-3 inline mr-1" />
+                                            {subtask.assignedUsers && subtask.assignedUsers.length > 0 
+                                              ? subtask.assignedUsers.length === 1 
+                                                ? subtask.assignedUsers[0].name 
+                                                : `${subtask.assignedUsers.length} users`
+                                              : 'Assign'}
                                           </button>
                                         )}
                                       </div>

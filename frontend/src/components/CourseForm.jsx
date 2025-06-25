@@ -57,6 +57,7 @@ export default function CourseForm({ courseId = null }) {
     deliverables: [],
     priority: 'medium',
     status: 'pre_development',
+    ownerId: '',
     startDate: '',
     dueDate: '',
     estimatedHours: '',
@@ -108,6 +109,15 @@ export default function CourseForm({ courseId = null }) {
     }
   });
 
+  // Fetch users for owner selection
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const response = await users.getAll();
+      return response.data;
+    }
+  });
+
   // Populate form when editing
   useEffect(() => {
     if (courseData) {
@@ -120,6 +130,7 @@ export default function CourseForm({ courseId = null }) {
         deliverables: course.deliverables?.map(d => d.id) || [],
         priority: course.priority || 'medium',
         status: course.status || 'pre_development',
+        ownerId: course.owner?.id || course.owner_id || '',
         startDate: course.start_date ? course.start_date.split('T')[0] : '',
         dueDate: course.due_date ? course.due_date.split('T')[0] : '',
         estimatedHours: course.estimated_hours || '',
@@ -247,6 +258,11 @@ export default function CourseForm({ courseId = null }) {
       status: formData.status,
       workflowTemplateId: formData.workflowTemplateId
     };
+
+    // Add ownerId if provided
+    if (formData.ownerId) {
+      submitData.ownerId = parseInt(formData.ownerId);
+    }
 
     // Add deliverables for all modalities
     submitData.deliverables = formData.deliverables;
@@ -389,6 +405,26 @@ export default function CourseForm({ courseId = null }) {
                   </select>
                 </div>
               )}
+
+              {/* Owner Selection */}
+              <div>
+                <label htmlFor="ownerId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Course Owner
+                </label>
+                <select
+                  id="ownerId"
+                  value={formData.ownerId}
+                  onChange={(e) => handleInputChange('ownerId', e.target.value)}
+                  className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="">Select an owner...</option>
+                  {(usersData?.data || usersData || []).map(user => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} ({user.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               {/* Modality Selection */}
               <div>
