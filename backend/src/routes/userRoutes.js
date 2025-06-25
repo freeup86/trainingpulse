@@ -26,5 +26,6 @@ router.put('/:id/profile', userController.updateUserProfile);
 router.get('/:id/stats', userController.getUserStats);
 router.get('/:id/activity', userController.getUserActivity);
 router.get('/:id/courses', userController.getUserCourses);
+router.get('/:id/subtask-assignments', userController.getUserSubtaskAssignments);
 
 module.exports = router;

@@ -287,7 +287,6 @@ class CourseController {
       description,
       modality,
       deliverables = [],
-      type,
       priority,
       ownerId,
       startDate,
@@ -319,10 +318,10 @@ class CourseController {
           title, description, modality, type, priority, status, owner_id, start_date, due_date,
           estimated_hours, estimated_daily_hours, metadata, created_by, updated_by,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, 'pre_development', $6, $7, $8, $9, $10, $11, $12, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, 'standard', $4, 'pre_development', $5, $6, $7, $8, $9, $10, $11, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `, [
-        title, description, modality, type, priority, ownerId || req.user.id, startDate, dueDate,
+        title, description, modality, priority, ownerId || req.user.id, startDate, dueDate,
         estimatedHours, estimatedDailyHours, JSON.stringify(metadata || {}),
         req.user.id
       ]);
@@ -396,10 +395,12 @@ class CourseController {
       `, [modality]);
 
       for (const task of modalityTasks.rows) {
-        await client.query(`
+        // Create subtask
+        const subtaskResult = await client.query(`
           INSERT INTO course_subtasks (
             course_id, title, task_type, status, is_blocking, weight, order_index, created_at, updated_at
-          ) VALUES ($1, $2, $3, 'pending', $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ) VALUES ($1, $2, $3, 'alpha_review', $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          RETURNING *
         `, [
           newCourse.id,
           task.task_type, // Use task_type as title
@@ -408,6 +409,14 @@ class CourseController {
           1, // Default weight
           task.order_index
         ]);
+
+        const newSubtask = subtaskResult.rows[0];
+
+        // Auto-create Alpha Review phase status history entry
+        await client.query(`
+          INSERT INTO phase_status_history (subtask_id, status, started_at, created_at, updated_at)
+          VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `, [newSubtask.id, 'alpha_review']);
       }
 
       // Create audit log
@@ -423,7 +432,7 @@ class CourseController {
         JSON.stringify({
           title,
           modality,
-          type,
+          type: 'standard',
           priority,
           workflowTemplateId,
           assignmentCount: assignments.length,
@@ -463,7 +472,7 @@ class CourseController {
       courseId: course.id,
       title,
       modality,
-      type,
+      type: 'standard',
       tasksCreated: result.tasksCreated,
       userId: req.user.id
     });

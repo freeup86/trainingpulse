@@ -413,18 +413,10 @@ class UserController {
     }
 
     // Validate input
-    console.log('=== PROFILE UPDATE DEBUG ===');
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
-    console.log('User ID:', id);
-    console.log('User role:', req.user.role);
-    
     const { error, value } = updateUserSchema.validate(req.body);
     if (error) {
-      console.log('Validation error:', JSON.stringify(error.details, null, 2));
       throw new ValidationError('Invalid update data', error.details);
     }
-    
-    console.log('Validated value:', JSON.stringify(value, null, 2));
 
     // Non-admins cannot change their own role or team
     if (req.user.role !== 'admin') {
@@ -887,7 +879,7 @@ class UserController {
             ca.role as user_role
           FROM courses c
           JOIN course_assignments ca ON c.id = ca.course_id
-          WHERE ca.user_id = $1
+          WHERE ca.user_id = $1 AND c.status != 'deleted'
         )
         SELECT 
           COUNT(*) FILTER (WHERE status = 'completed') as completed_courses,
@@ -995,7 +987,7 @@ class UserController {
         FROM courses c
         JOIN course_assignments ca ON c.id = ca.course_id
         LEFT JOIN workflow_instances wi ON c.id = wi.course_id AND wi.is_complete = false
-        WHERE ca.user_id = $1 ${whereClause}
+        WHERE ca.user_id = $1 AND c.status != 'deleted' ${whereClause}
         ORDER BY c.due_date ASC NULLS LAST, c.priority DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
@@ -1013,6 +1005,95 @@ class UserController {
       });
     } finally {
       client.release();
+    }
+  });
+
+  /**
+   * GET /users/:id/subtask-assignments - Get user's subtask assignments
+   */
+  getUserSubtaskAssignments = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    try {
+      let whereClause = '';
+      const values = [id];
+      let paramCount = 1;
+      
+      if (status) {
+        paramCount++;
+        whereClause = ` AND cs.status = $${paramCount}`;
+        values.push(status);
+      }
+
+      const assignmentsQuery = `
+        SELECT 
+          cs.id as subtask_id,
+          cs.title as phase_title,
+          cs.status as phase_status,
+          cs.order_index,
+          cs.start_date,
+          cs.finish_date,
+          c.id as course_id,
+          c.title as course_title,
+          c.description as course_description,
+          c.priority as course_priority,
+          c.due_date as course_due_date,
+          sa.assigned_at,
+          sa.assigned_by,
+          assigner.name as assigned_by_name,
+          psh.started_at as status_started_at,
+          psh.finished_at as status_finished_at
+        FROM subtask_assignments sa
+        JOIN course_subtasks cs ON sa.subtask_id = cs.id
+        JOIN courses c ON cs.course_id = c.id
+        LEFT JOIN users assigner ON sa.assigned_by = assigner.id
+        LEFT JOIN phase_status_history psh ON cs.id = psh.subtask_id AND psh.status = cs.status AND psh.finished_at IS NULL
+        WHERE sa.user_id = $1 AND c.status != 'deleted' ${whereClause}
+        ORDER BY c.priority DESC, c.due_date ASC NULLS LAST, cs.order_index ASC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+
+      const result = await query(assignmentsQuery, values);
+
+      res.json({
+        success: true,
+        data: {
+          assignments: result.rows.map(assignment => ({
+            subtask: {
+              id: assignment.subtask_id,
+              title: assignment.phase_title,
+              status: assignment.phase_status,
+              orderIndex: assignment.order_index,
+              startDate: assignment.start_date,
+              finishDate: assignment.finish_date,
+              statusStartedAt: assignment.status_started_at,
+              statusFinishedAt: assignment.status_finished_at
+            },
+            course: {
+              id: assignment.course_id,
+              title: assignment.course_title,
+              description: assignment.course_description,
+              priority: assignment.course_priority,
+              dueDate: assignment.course_due_date
+            },
+            assignment: {
+              assignedAt: assignment.assigned_at,
+              assignedBy: assignment.assigned_by ? {
+                id: assignment.assigned_by,
+                name: assignment.assigned_by_name
+              } : null
+            }
+          }))
+        }
+      });
+
+    } catch (error) {
+      logger.logError(error, {
+        context: 'UserController.getUserSubtaskAssignments',
+        userId: id
+      });
+      throw error;
     }
   });
 }
