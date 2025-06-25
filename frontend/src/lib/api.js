@@ -199,6 +199,9 @@ export const users = {
   
   updateCapacity: (id, capacity) =>
     api.put(`/users/${id}/capacity`, capacity),
+
+  getSubtaskAssignments: (id) =>
+    api.get(`/users/${id}/subtask-assignments`),
   
   getWorkload: (id, params = {}) =>
     api.get(`/users/${id}/workload`, { params }),

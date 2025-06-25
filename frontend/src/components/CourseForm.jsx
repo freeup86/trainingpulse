@@ -179,6 +179,9 @@ export default function CourseForm({ courseId = null }) {
     onSuccess: () => {
       toast.success('Course deleted successfully');
       queryClient.invalidateQueries(['courses']);
+      queryClient.invalidateQueries(['user-courses']);
+      queryClient.invalidateQueries(['user-phase-assignments']);
+      queryClient.invalidateQueries(['user-stats']);
       navigate('/courses');
     },
     onError: (error) => {
@@ -260,9 +263,13 @@ export default function CourseForm({ courseId = null }) {
       description: formData.description.trim(),
       modality: formData.modality,
       priority: formData.priority,
-      status: formData.status,
       workflowTemplateId: formData.workflowTemplateId
     };
+
+    // Only include status for updates, not for creation
+    if (isEditing) {
+      submitData.status = formData.status;
+    }
 
     // Add ownerId if provided
     if (formData.ownerId) {

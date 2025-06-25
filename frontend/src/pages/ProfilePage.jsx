@@ -62,7 +62,14 @@ function ProfilePage() {
     enabled: Boolean(user?.id)
   });
 
-  const isLoading = statsLoading || activityLoading || assignmentsLoading;
+  // Fetch user phase assignments (subtasks assigned to user)
+  const { data: phaseAssignmentsData, isLoading: phaseAssignmentsLoading, error: phaseAssignmentsError } = useQuery({
+    queryKey: ['user-phase-assignments', user?.id],
+    queryFn: () => users.getSubtaskAssignments(user.id),
+    enabled: Boolean(user?.id)
+  });
+
+  const isLoading = statsLoading || activityLoading || assignmentsLoading || phaseAssignmentsLoading;
   const error = null;
 
   // Update profile mutation
@@ -112,7 +119,11 @@ function ProfilePage() {
   const profile = user;
   const stats = statsData?.data || {};
   const activities = activityData?.data?.activities || [];
-  const assignments = assignmentsData?.data?.courses || [];
+  const courseAssignments = assignmentsData?.data?.courses || [];
+  const phaseAssignments = phaseAssignmentsData?.data?.data?.assignments || [];
+  
+  // Combine course and phase assignments
+  const assignments = [...courseAssignments, ...phaseAssignments];
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: User },
@@ -466,13 +477,31 @@ function ProfileOverview({ profile, isEditing, onSave }) {
 
 // Profile Assignments Component
 function ProfileAssignments({ assignments }) {
+  const queryClient = useQueryClient();
+  
+  const handleRefresh = () => {
+    queryClient.invalidateQueries(['user-phase-assignments']);
+    queryClient.invalidateQueries(['user-courses']);
+    queryClient.invalidateQueries(['user-stats']);
+  };
+  
   return (
     <div className="bg-white dark:bg-gray-800 shadow rounded-lg">
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-medium text-gray-900 dark:text-white">My Assignments</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {assignments.length} active assignment{assignments.length !== 1 ? 's' : ''}
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-white">My Assignments</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {assignments.length} active assignment{assignments.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          <button
+            onClick={handleRefresh}
+            className="inline-flex items-center px-3 py-1 text-xs font-medium rounded text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-400 dark:bg-blue-900/20 dark:hover:bg-blue-900/30"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {assignments.length === 0 ? (
@@ -483,36 +512,53 @@ function ProfileAssignments({ assignments }) {
         </div>
       ) : (
         <div className="divide-y divide-gray-200 dark:divide-gray-700">
-          {assignments.map((assignment) => (
-            <div key={assignment.id} className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <h4 className="text-sm font-medium text-gray-900 dark:text-white">
-                    {assignment.title}
-                  </h4>
-                  {assignment.description && (
-                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
-                      {assignment.description}
-                    </p>
-                  )}
-                  <div className="mt-2 flex items-center text-sm text-gray-500 dark:text-gray-400 space-x-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(assignment.status, 'badge')}`}>
-                      {assignment.status?.replace('_', ' ')}
-                    </span>
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(assignment.priority, 'badge')}`}>
-                      {assignment.priority}
-                    </span>
-                    {assignment.dueDate && (
-                      <span>Due: {formatDate(assignment.dueDate)}</span>
+          {assignments.map((assignment, index) => {
+            // Since we know these are all phase assignments, simplify the logic
+            const title = `${assignment.course.title} - ${assignment.subtask.title}`;
+            const status = assignment.subtask.status;
+            const priority = assignment.course.priority;
+            const dueDate = assignment.course.dueDate;
+            const assignedAt = assignment.assignment.assignedAt;
+            
+            return (
+              <div key={`phase-assignment-${assignment.subtask.id}`} className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                        {title}
+                      </h4>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+                        Phase Assignment
+                      </span>
+                    </div>
+                    {assignment.course.description && (
+                      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
+                        {assignment.course.description}
+                      </p>
                     )}
+                    <div className="mt-2 flex items-center text-sm text-gray-500 dark:text-gray-400 space-x-4">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(status, 'badge')}`}>
+                        {status?.replace('_', ' ')}
+                      </span>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(priority, 'badge')}`}>
+                        {priority}
+                      </span>
+                      {dueDate && (
+                        <span>Due: {formatDate(dueDate)}</span>
+                      )}
+                      {assignedAt && (
+                        <span>Assigned: {formatDate(assignedAt)}</span>
+                      )}
+                    </div>
                   </div>
+                  <button className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium">
+                    View Details
+                  </button>
                 </div>
-                <button className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium">
-                  View Details
-                </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

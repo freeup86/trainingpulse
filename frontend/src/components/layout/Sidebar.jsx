@@ -9,6 +9,7 @@ import {
   Settings,
   FileSpreadsheet,
   Shield,
+  ClipboardList,
   X
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth.jsx';
@@ -28,6 +29,12 @@ const navigation = [
     href: '/courses',
     icon: BookOpen,
     permissions: ['courses.view']
+  },
+  {
+    name: 'Assignments',
+    href: '/assignments',
+    icon: ClipboardList,
+    permissions: ['courses.view'] // Same permission as courses since it shows course assignments
   },
   {
     name: 'Teams',

@@ -1487,15 +1487,11 @@ function CoursePhases({ courseId }) {
 
   const handleAssignmentConfirm = (subtaskId) => {
     const newAssignedUserIds = tempAssignment[subtaskId] || [];
-    
-    console.log('handleAssignmentConfirm called:', { subtaskId, newAssignedUserIds });
-    
     updateSubtaskMutation.mutate({
       subtaskId,
       updateData: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
     }, {
       onSuccess: () => {
-        console.log('Assignment update successful');
         setEditingAssignmentId(null);
         setTempAssignment({});
         toast.success('Assignments updated successfully');
@@ -1695,7 +1691,6 @@ function CoursePhases({ courseId }) {
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              console.log('Confirm button clicked for task:', taskId);
                               handleAssignmentConfirm(taskId);
                             }}
                             disabled={updateSubtaskMutation.isLoading}
@@ -1709,7 +1704,6 @@ function CoursePhases({ courseId }) {
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              console.log('Cancel button clicked');
                               handleAssignmentCancel();
                             }}
                             disabled={updateSubtaskMutation.isLoading}

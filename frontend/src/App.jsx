@@ -16,6 +16,7 @@ import WorkflowsPage from './pages/WorkflowsPage';
 import BulkOperationsPage from './pages/BulkOperationsPage';
 import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
+import AssignmentsPage from './pages/AssignmentsPage';
 import CreateCoursePage from './pages/CreateCoursePage';
 import EditCoursePage from './pages/EditCoursePage';
 import CreateTeamPage from './pages/CreateTeamPage';
@@ -110,6 +111,7 @@ function App() {
                     <Route path="courses/create" element={<CreateCoursePage />} />
                     <Route path="courses/:id" element={<CourseDetailPage />} />
                     <Route path="courses/:id/edit" element={<EditCoursePage />} />
+                    <Route path="assignments" element={<AssignmentsPage />} />
                     <Route path="teams" element={<TeamsPage />} />
                     <Route path="teams/create" element={<CreateTeamPage />} />
                     <Route path="teams/:id/edit" element={<EditTeamPage />} />

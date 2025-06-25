@@ -798,58 +798,18 @@ export default function CourseDetailPage() {
                                         </span>
                                       </div>
                                       {(() => {
-                                        // Get current phase status details
-                                        const currentStatusHistory = subtask.status_history?.find(h => h.status === subtask.status);
-                                        const hasDateInfo = subtask.start_date || subtask.finish_date || currentStatusHistory?.started_at || currentStatusHistory?.finished_at;
+                                        // Only show assignees, hide all date information
                                         const hasAssignees = subtask.assignedUsers && subtask.assignedUsers.length > 0;
                                         
-                                        return (hasDateInfo || hasAssignees) && (
+                                        return hasAssignees && (
                                           <div className="flex flex-col space-y-1 mt-2 text-xs text-gray-500 dark:text-gray-400">
-                                            {/* Overall phase dates */}
-                                            {(subtask.start_date || subtask.finish_date) && (
-                                              <div className="flex items-center space-x-4">
-                                                {subtask.start_date && (
-                                                  <div className="flex items-center space-x-1">
-                                                    <Calendar className="h-3 w-3" />
-                                                    <span>Phase Started: {new Date(subtask.start_date).toLocaleDateString()}</span>
-                                                  </div>
-                                                )}
-                                                {subtask.finish_date && (
-                                                  <div className="flex items-center space-x-1">
-                                                    <CheckCircle className="h-3 w-3" />
-                                                    <span>Phase Finished: {new Date(subtask.finish_date).toLocaleDateString()}</span>
-                                                  </div>
-                                                )}
-                                              </div>
-                                            )}
-                                            
-                                            {/* Current status dates */}
-                                            {currentStatusHistory && (currentStatusHistory.started_at || currentStatusHistory.finished_at) && (
-                                              <div className="flex items-center space-x-4">
-                                                {currentStatusHistory.started_at && (
-                                                  <div className="flex items-center space-x-1">
-                                                    <Clock className="h-3 w-3" />
-                                                    <span>Status Started: {new Date(currentStatusHistory.started_at).toLocaleDateString()}</span>
-                                                  </div>
-                                                )}
-                                                {currentStatusHistory.finished_at && (
-                                                  <div className="flex items-center space-x-1">
-                                                    <CheckCircle className="h-3 w-3" />
-                                                    <span>Status Finished: {new Date(currentStatusHistory.finished_at).toLocaleDateString()}</span>
-                                                  </div>
-                                                )}
-                                              </div>
-                                            )}
-                                            
                                             {/* Assigned users */}
-                                            {hasAssignees && (
-                                              <div className="flex items-center space-x-1">
-                                                <Users className="h-3 w-3" />
-                                                <span>
-                                                  Assigned to: {subtask.assignedUsers.map(user => user.name).join(', ')}
-                                                </span>
-                                              </div>
-                                            )}
+                                            <div className="flex items-center space-x-1">
+                                              <Users className="h-3 w-3" />
+                                              <span>
+                                                Assigned to: {subtask.assignedUsers.map(user => user.name).join(', ')}
+                                              </span>
+                                            </div>
                                           </div>
                                         );
                                       })()}
