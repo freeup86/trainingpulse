@@ -83,81 +83,80 @@ function App() {
         <AuthProvider>
           <ThemeProvider>
             <CompactModeProvider>
-          <div className="App">
-            <Routes>
-              {/* Public routes */}
-              <Route
-                path="/login"
-                element={
-                  <PublicRoute>
-                    <LoginPage />
-                  </PublicRoute>
-                }
-              />
+              <div className="App">
+                <Routes>
+                  {/* Public routes */}
+                  <Route
+                    path="/login"
+                    element={
+                      <PublicRoute>
+                        <LoginPage />
+                      </PublicRoute>
+                    }
+                  />
 
-              {/* Protected routes */}
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <AppShell />
-                  </ProtectedRoute>
-                }
-              >
-                <Route index element={<Navigate to="/dashboard" replace />} />
-                <Route path="dashboard" element={<DashboardPage />} />
-                {/* Additional routes will be added here */}
-                <Route path="courses" element={<CoursesPage />} />
-                <Route path="courses/create" element={<CreateCoursePage />} />
-                <Route path="courses/:id" element={<CourseDetailPage />} />
-                <Route path="courses/:id/edit" element={<EditCoursePage />} />
-                <Route path="teams" element={<TeamsPage />} />
-                <Route path="teams/create" element={<CreateTeamPage />} />
-                <Route path="teams/:id/edit" element={<EditTeamPage />} />
-                <Route path="analytics" element={<AnalyticsPage />} />
-                <Route path="workflows" element={<WorkflowsPage />} />
-                <Route path="workflows/create" element={<WorkflowCreatePage />} />
-                <Route path="workflows/:id/edit" element={<WorkflowCreatePage />} />
-                <Route path="workflows/test" element={<TestWorkflowPage />} />
-                <Route path="bulk" element={<BulkOperationsPage />} />
-                <Route path="notifications" element={<NotificationsPage />} />
-                <Route path="admin" element={<AdminPage />} />
-                <Route path="settings" element={<SettingsPage />} />
-                <Route path="profile" element={<ProfilePage />} />
-                <Route path="test" element={<TestPage />} />
-                <Route path="minimal" element={<MinimalPage />} />
-              </Route>
+                  {/* Protected routes */}
+                  <Route
+                    path="/"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Navigate to="/dashboard" replace />} />
+                    <Route path="dashboard" element={<DashboardPage />} />
+                    <Route path="courses" element={<CoursesPage />} />
+                    <Route path="courses/create" element={<CreateCoursePage />} />
+                    <Route path="courses/:id" element={<CourseDetailPage />} />
+                    <Route path="courses/:id/edit" element={<EditCoursePage />} />
+                    <Route path="teams" element={<TeamsPage />} />
+                    <Route path="teams/create" element={<CreateTeamPage />} />
+                    <Route path="teams/:id/edit" element={<EditTeamPage />} />
+                    <Route path="analytics" element={<AnalyticsPage />} />
+                    <Route path="workflows" element={<WorkflowsPage />} />
+                    <Route path="workflows/create" element={<WorkflowCreatePage />} />
+                    <Route path="workflows/:id/edit" element={<WorkflowCreatePage />} />
+                    <Route path="workflows/test" element={<TestWorkflowPage />} />
+                    <Route path="bulk" element={<BulkOperationsPage />} />
+                    <Route path="notifications" element={<NotificationsPage />} />
+                    <Route path="admin" element={<AdminPage />} />
+                    <Route path="settings" element={<SettingsPage />} />
+                    <Route path="profile" element={<ProfilePage />} />
+                    <Route path="test" element={<TestPage />} />
+                    <Route path="minimal" element={<MinimalPage />} />
+                  </Route>
 
-              {/* Catch all route */}
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
-            </Routes>
+                  {/* Catch all route */}
+                  <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                </Routes>
 
-            {/* Toast notifications */}
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 4000,
-                style: {
-                  background: '#363636',
-                  color: '#fff',
-                },
-                success: {
-                  duration: 3000,
-                  iconTheme: {
-                    primary: '#10b981',
-                    secondary: '#fff',
-                  },
-                },
-                error: {
-                  duration: 5000,
-                  iconTheme: {
-                    primary: '#ef4444',
-                    secondary: '#fff',
-                  },
-                },
-              }}
-            />
-          </div>
+                {/* Toast notifications */}
+                <Toaster
+                  position="top-right"
+                  toastOptions={{
+                    duration: 4000,
+                    style: {
+                      background: '#363636',
+                      color: '#fff',
+                    },
+                    success: {
+                      duration: 3000,
+                      iconTheme: {
+                        primary: '#10b981',
+                        secondary: '#fff',
+                      },
+                    },
+                    error: {
+                      duration: 5000,
+                      iconTheme: {
+                        primary: '#ef4444',
+                        secondary: '#fff',
+                      },
+                    },
+                  }}
+                />
+              </div>
             </CompactModeProvider>
           </ThemeProvider>
         </AuthProvider>

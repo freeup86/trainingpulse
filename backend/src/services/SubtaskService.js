@@ -111,6 +111,7 @@ class SubtaskService {
    */
   async updateSubtask(subtaskId, updateData, userId) {
     try {
+
       // Get current subtask data
       const currentResult = await query(
         'SELECT * FROM course_subtasks WHERE id = $1',
@@ -202,26 +203,41 @@ class SubtaskService {
         };
       }
 
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates).length === 0 && !changes.assignmentUpdate) {
         return currentSubtask; // No changes to make
       }
 
       const updatedSubtask = await transaction(async (client) => {
-        // Build update query
-        const setClause = Object.keys(updates)
-          .map((field, index) => `${field} = $${index + 2}`)
-          .join(', ');
+        let updated;
         
-        const values = [subtaskId, ...Object.values(updates)];
+        // Only run SQL update if there are field updates
+        if (Object.keys(updates).length > 0) {
+          // Build update query
+          const setClause = Object.keys(updates)
+            .map((field, index) => `${field} = $${index + 2}`)
+            .join(', ');
+          
+          const values = [subtaskId, ...Object.values(updates)];
 
-        const result = await client.query(`
-          UPDATE course_subtasks 
-          SET ${setClause}, updated_at = CURRENT_TIMESTAMP
-          WHERE id = $1
-          RETURNING *
-        `, values);
+          const result = await client.query(`
+            UPDATE course_subtasks 
+            SET ${setClause}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            RETURNING *
+          `, values);
 
-        const updated = result.rows[0];
+          updated = result.rows[0];
+        } else {
+          // No field updates, just get current subtask and update timestamp
+          const result = await client.query(`
+            UPDATE course_subtasks 
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            RETURNING *
+          `, [subtaskId]);
+
+          updated = result.rows[0];
+        }
 
         // Handle status history tracking
         if (changes.statusHistory) {
@@ -334,6 +350,7 @@ class SubtaskService {
         if (changes.assignmentUpdate) {
           const { newAssignedUserIds, assignedBy } = changes.assignmentUpdate;
           
+          
           // Get current assignments
           const currentAssignmentsResult = await client.query(`
             SELECT user_id FROM subtask_assignments WHERE subtask_id = $1
@@ -342,16 +359,20 @@ class SubtaskService {
           const currentUserIds = currentAssignmentsResult.rows.map(row => row.user_id);
           const newUserIds = newAssignedUserIds || [];
           
+          
           // Find users to add and remove
           const usersToAdd = newUserIds.filter(uid => !currentUserIds.includes(uid));
           const usersToRemove = currentUserIds.filter(uid => !newUserIds.includes(uid));
           
+          
           // Remove assignments
           if (usersToRemove.length > 0) {
-            await client.query(`
+            const deleteResult = await client.query(`
               DELETE FROM subtask_assignments 
               WHERE subtask_id = $1 AND user_id = ANY($2)
+              RETURNING *
             `, [subtaskId, usersToRemove]);
+            
             
             logger.info('Removed user assignments', {
               subtaskId,
@@ -362,10 +383,12 @@ class SubtaskService {
           
           // Add new assignments
           for (const userIdToAdd of usersToAdd) {
-            await client.query(`
+            const insertResult = await client.query(`
               INSERT INTO subtask_assignments (subtask_id, user_id, assigned_by, assigned_at)
               VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+              RETURNING *
             `, [subtaskId, userIdToAdd, assignedBy]);
+            
           }
           
           if (usersToAdd.length > 0) {
@@ -375,6 +398,11 @@ class SubtaskService {
               assignedBy
             });
           }
+          
+          // Verify final assignments
+          const finalAssignmentsResult = await client.query(`
+            SELECT user_id FROM subtask_assignments WHERE subtask_id = $1
+          `, [subtaskId]);
           
           changes.assignmentChanges = {
             added: usersToAdd,
@@ -406,6 +434,38 @@ class SubtaskService {
 
       if (significantChanges) {
         await this.statusAggregator.updateCourseStatus(courseId, { triggeredBy: userId });
+      }
+
+      // If assignments were updated, fetch the current assignments to include in response
+      if (changes.assignmentUpdate) {
+        const assignmentsResult = await query(`
+          SELECT 
+            sa.user_id,
+            sa.assigned_at,
+            sa.assigned_by,
+            u.name as user_name,
+            u.email as user_email,
+            assigner.name as assigned_by_name
+          FROM subtask_assignments sa
+          JOIN users u ON sa.user_id = u.id
+          LEFT JOIN users assigner ON sa.assigned_by = assigner.id
+          WHERE sa.subtask_id = $1
+          ORDER BY sa.assigned_at ASC
+        `, [subtaskId]);
+
+        updatedSubtask.assignedUsers = assignmentsResult.rows.map(assignment => ({
+          id: assignment.user_id,
+          name: assignment.user_name,
+          email: assignment.user_email,
+          assignedAt: assignment.assigned_at,
+          assignedBy: assignment.assigned_by ? {
+            id: assignment.assigned_by,
+            name: assignment.assigned_by_name
+          } : null
+        }));
+
+        // Backward compatibility: set assignedUser to first user if any
+        updatedSubtask.assignedUser = updatedSubtask.assignedUsers.length > 0 ? updatedSubtask.assignedUsers[0] : null;
       }
 
       logger.info('Subtask updated', {

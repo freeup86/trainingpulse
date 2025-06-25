@@ -114,7 +114,7 @@ export default function CourseForm({ courseId = null }) {
     queryKey: ['users'],
     queryFn: async () => {
       const response = await users.getAll();
-      return response.data;
+      return response.data.data.users; // Extract users array
     }
   });
 
@@ -418,7 +418,7 @@ export default function CourseForm({ courseId = null }) {
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                 >
                   <option value="">Select an owner...</option>
-                  {(usersData?.data || usersData || []).map(user => (
+                  {(usersData || []).map(user => (
                     <option key={user.id} value={user.id}>
                       {user.name} ({user.email})
                     </option>

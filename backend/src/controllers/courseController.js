@@ -66,6 +66,18 @@ const createSubtaskSchema = (validStatuses = ['pending', 'in_progress', 'complet
   });
 };
 
+const updateSubtaskSchema = (validStatuses = ['pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
+  return Joi.object({
+    title: Joi.string().min(1).max(255).optional().trim(),
+    status: Joi.string().valid(...validStatuses).optional(),
+    isBlocking: Joi.boolean().optional(),
+    weight: Joi.number().integer().min(1).max(100).optional(),
+    orderIndex: Joi.number().integer().min(1).optional(),
+    assignedUserId: Joi.number().integer().positive().optional(),
+    assignedUserIds: Joi.array().items(Joi.number().integer().positive()).optional()
+  });
+};
+
 class CourseController {
   constructor() {
     this.statusAggregator = new StatusAggregator();
@@ -811,13 +823,15 @@ class CourseController {
   updateSubtask = asyncHandler(async (req, res) => {
     const { subtaskId } = req.params;
 
+
     // Get valid phase statuses and create dynamic schema
     const validStatuses = await this.getValidPhaseStatuses();
-    const subtaskSchema = createSubtaskSchema(validStatuses);
+    const subtaskSchema = updateSubtaskSchema(validStatuses);
 
     // Validate input
     const { error, value } = subtaskSchema.validate(req.body);
     if (error) {
+      console.log('Validation failed:', error.details);
       throw new ValidationError('Invalid subtask data', error.details);
     }
 

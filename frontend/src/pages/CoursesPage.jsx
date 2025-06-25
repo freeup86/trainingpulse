@@ -24,7 +24,7 @@ import {
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { courses, statuses, phaseStatuses } from '../lib/api';
+import { courses, statuses, phaseStatuses, users } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
 
 // Independent status definitions (separate from workflow)
@@ -1268,6 +1268,8 @@ function CoursePhases({ courseId }) {
   const [tempStatus, setTempStatus] = useState({});
   const [editingDate, setEditingDate] = useState(null); // For tracking which date is being edited
   const [tempDateValue, setTempDateValue] = useState(''); // For storing temporary date input
+  const [editingAssignmentId, setEditingAssignmentId] = useState(null);
+  const [tempAssignment, setTempAssignment] = useState({});
 
   // Fetch phase statuses from database
   const { data: phaseStatusesData } = useQuery({
@@ -1275,6 +1277,15 @@ function CoursePhases({ courseId }) {
     queryFn: async () => {
       const response = await phaseStatuses.getAll();
       return response.data.data; // Extract the actual array from {success: true, data: [...]}
+    }
+  });
+
+  // Fetch users for assignment
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const response = await users.getAll();
+      return response.data.data.users; // Extract users array
     }
   });
 
@@ -1286,6 +1297,8 @@ function CoursePhases({ courseId }) {
         setTempStatus({});
         setEditingDate(null);
         setTempDateValue('');
+        setEditingAssignmentId(null);
+        setTempAssignment({});
       }
     };
 
@@ -1303,6 +1316,15 @@ function CoursePhases({ courseId }) {
         setEditingDate(null);
         setTempDateValue('');
       }
+      // Close assignment editing if clicking outside the assignment area
+      if (editingAssignmentId && 
+          !e.target.closest('input[type="checkbox"]') &&
+          !e.target.closest('label') &&
+          !e.target.closest('button') &&
+          !e.target.closest('.bg-white.dark\\:bg-gray-700')) {
+        setEditingAssignmentId(null);
+        setTempAssignment({});
+      }
     };
 
     document.addEventListener('keydown', handleKeyDown);
@@ -1312,7 +1334,7 @@ function CoursePhases({ courseId }) {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [editingTaskId, editingDate]);
+  }, [editingTaskId, editingDate, editingAssignmentId]);
   
   const { data: courseData, isLoading } = useQuery({
     queryKey: ['course', courseId],
@@ -1437,6 +1459,42 @@ function CoursePhases({ courseId }) {
     });
   };
 
+  // Assignment handling functions
+  const handleAssignmentClick = (subtaskId, currentAssignedUserIds) => {
+    setEditingAssignmentId(subtaskId);
+    setTempAssignment({ [subtaskId]: currentAssignedUserIds || [] });
+  };
+
+  const handleAssignmentToggle = (subtaskId, userId) => {
+    const currentAssignments = tempAssignment[subtaskId] || [];
+    const isAssigned = currentAssignments.includes(userId);
+    
+    let newAssignments;
+    if (isAssigned) {
+      newAssignments = currentAssignments.filter(id => id !== userId);
+    } else {
+      newAssignments = [...currentAssignments, userId];
+    }
+    
+    setTempAssignment({ [subtaskId]: newAssignments });
+  };
+
+  const handleAssignmentConfirm = (subtaskId) => {
+    const newAssignedUserIds = tempAssignment[subtaskId] || [];
+    
+    updateSubtaskMutation.mutate({
+      subtaskId,
+      updateData: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
+    });
+    setEditingAssignmentId(null);
+    setTempAssignment({});
+  };
+
+  const handleAssignmentCancel = () => {
+    setEditingAssignmentId(null);
+    setTempAssignment({});
+  };
+
   const subtasks = courseData?.data?.data?.subtasks || [];
 
   if (isLoading) {
@@ -1488,8 +1546,9 @@ function CoursePhases({ courseId }) {
         <div className="ml-6 mb-2">
           <div className="flex text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
             <div className="w-48">Phase</div>
-            <div className="w-24 ml-2">Status</div>
-            <div className="w-32 ml-20">Alpha Start/End</div>
+            <div className="w-28 ml-2">Status</div>
+            <div className="w-40 ml-2">Assignees</div>
+            <div className="w-32 ml-4">Alpha Start/End</div>
             <div className="w-32 ml-4">Beta Start/End</div>
             <div className="w-32 ml-4">Final Start/End</div>
           </div>
@@ -1534,7 +1593,7 @@ function CoursePhases({ courseId }) {
                 </div>
                 
                 {/* Status Dropdown Column */}
-                <div className="w-24 ml-2">
+                <div className="w-28 ml-2">
                   {canEdit ? (
                     <div className="relative group">
                       <select
@@ -1589,8 +1648,88 @@ function CoursePhases({ courseId }) {
                   )}
                 </div>
                 
+                {/* Assignees Column */}
+                <div className="w-40 ml-2 text-xs">
+                  {editingAssignmentId === taskId ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="relative">
+                        <div className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-2 max-h-32 overflow-y-auto min-w-36">
+                          {(usersData || []).map(user => {
+                            const isSelected = (tempAssignment[taskId] || []).includes(user.id);
+                            return (
+                              <label key={user.id} className="flex items-center space-x-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-600 p-1 rounded cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => handleAssignmentToggle(taskId, user.id)}
+                                  className="h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                />
+                                <span className="text-gray-900 dark:text-white truncate">{user.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAssignmentConfirm(taskId);
+                        }}
+                        disabled={updateSubtaskMutation.isLoading}
+                        className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
+                      >
+                        <CheckCircle className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAssignmentCancel();
+                        }}
+                        disabled={updateSubtaskMutation.isLoading}
+                        className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAssignmentClick(taskId, (task.assignedUsers || []).map(u => u.id));
+                      }}
+                      className="w-full text-left hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded transition-colors"
+                      title="Click to edit assignees"
+                    >
+                      {task.assignedUsers && task.assignedUsers.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {task.assignedUsers.slice(0, 2).map((user, userIndex) => (
+                            <div
+                              key={user.id}
+                              className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                              title={user.name}
+                            >
+                              <Users className="h-2.5 w-2.5 mr-1" />
+                              <span className="truncate max-w-16">{user.name.split(' ')[0]}</span>
+                            </div>
+                          ))}
+                          {task.assignedUsers.length > 2 && (
+                            <div
+                              className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                              title={`${task.assignedUsers.length - 2} more: ${task.assignedUsers.slice(2).map(u => u.name).join(', ')}`}
+                            >
+                              +{task.assignedUsers.length - 2}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-500 italic">Unassigned</span>
+                      )}
+                    </button>
+                  )}
+                </div>
+                
                 {/* Alpha Review Start/End Column */}
-                <div className="w-32 ml-20 text-xs text-gray-600 dark:text-gray-400">
+                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
                   {(() => {
                     const alphaHistory = task.status_history?.find(h => h.status === 'alpha_review');
                     if (alphaHistory) {

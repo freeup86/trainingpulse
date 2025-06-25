@@ -210,9 +210,11 @@ export function DashboardPage() {
               <div className="text-center py-6">
                 <BookOpen className="h-12 w-12 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
                 <p className="text-gray-500 dark:text-gray-400">No recent courses found</p>
-                <Button variant="outline" className="mt-2" asChild>
-                  <Link to="/courses">View All Courses</Link>
-                </Button>
+                <Link to="/courses">
+                  <Button variant="outline" className="mt-2">
+                    View All Courses
+                  </Button>
+                </Link>
               </div>
             ) : (
               <div className="space-y-4">
@@ -240,9 +242,11 @@ export function DashboardPage() {
                   </div>
                 ))}
                 <div className="pt-2">
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link to="/courses">View All Courses</Link>
-                  </Button>
+                  <Link to="/courses" className="block">
+                    <Button variant="outline" className="w-full">
+                      View All Courses
+                    </Button>
+                  </Link>
                 </div>
               </div>
             )}
@@ -285,9 +289,11 @@ export function DashboardPage() {
                   </div>
                 ))}
                 <div className="pt-2">
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link to="/notifications">View All Notifications</Link>
-                  </Button>
+                  <Link to="/notifications" className="block">
+                    <Button variant="outline" className="w-full">
+                      View All Notifications
+                    </Button>
+                  </Link>
                 </div>
               </div>
             )}
@@ -332,12 +338,12 @@ export function DashboardPage() {
                   </div>
                 ))}
                 <div className="pt-2">
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link to="/analytics">
+                  <Link to="/analytics" className="block">
+                    <Button variant="outline" className="w-full">
                       <BarChart3 className="h-4 w-4 mr-2" />
                       View Analytics
-                    </Link>
-                  </Button>
+                    </Button>
+                  </Link>
                 </div>
               </div>
             )}

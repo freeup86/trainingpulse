@@ -112,6 +112,10 @@ export default function CourseDetailPage() {
   const [isEditingCourseStatus, setIsEditingCourseStatus] = useState(false);
   const [editingAssignmentId, setEditingAssignmentId] = useState(null);
   const [tempAssignment, setTempAssignment] = useState({});
+  const [isEditingPriority, setIsEditingPriority] = useState(false);
+  const [tempPriority, setTempPriority] = useState('');
+  const [isEditingOwner, setIsEditingOwner] = useState(false);
+  const [tempOwnerId, setTempOwnerId] = useState('');
 
   const { data: courseData, isLoading, error } = useQuery({
     queryKey: ['course', id],
@@ -188,20 +192,25 @@ export default function CourseDetailPage() {
 
   // Update subtask mutation for phase status changes
   const updateSubtaskMutation = useMutation({
-    mutationFn: ({ subtaskId, updateData }) => 
-      courses.updateSubtask(id, subtaskId, updateData),
+    mutationFn: ({ subtaskId, updateData }) => {
+      return courses.updateSubtask(id, subtaskId, updateData);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries(['course', id]);
       queryClient.invalidateQueries(['courses']);
-      toast.success('Phase status updated successfully');
+      toast.success('Phase updated successfully');
       setEditingPhaseId(null);
       setTempPhaseStatus({});
+      setEditingAssignmentId(null);
+      setTempAssignment({});
     },
     onError: (error) => {
       console.error('Subtask update error:', error);
-      toast.error(error.response?.data?.error?.message || 'Failed to update phase status');
+      toast.error(error.response?.data?.error?.message || 'Failed to update phase');
       setEditingPhaseId(null);
       setTempPhaseStatus({});
+      setEditingAssignmentId(null);
+      setTempAssignment({});
     }
   });
 
@@ -218,6 +227,24 @@ export default function CourseDetailPage() {
       console.error('Course status update error:', error);
       toast.error(error.response?.data?.error?.message || 'Failed to update course status');
       setIsEditingCourseStatus(false);
+    }
+  });
+
+  // Update course details mutation (for priority and owner)
+  const updateCourseDetailsMutation = useMutation({
+    mutationFn: (updateData) => courses.update(id, updateData),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['course', id]);
+      queryClient.invalidateQueries(['courses']);
+      toast.success('Course updated successfully');
+      setIsEditingPriority(false);
+      setIsEditingOwner(false);
+    },
+    onError: (error) => {
+      console.error('Course update error:', error);
+      toast.error(error.response?.data?.error?.message || 'Failed to update course');
+      setIsEditingPriority(false);
+      setIsEditingOwner(false);
     }
   });
 
@@ -309,9 +336,10 @@ export default function CourseDetailPage() {
 
   const handleAssignmentConfirm = (subtaskId) => {
     const newAssignedUserIds = tempAssignment[subtaskId] || [];
+    
     updateSubtaskMutation.mutate({
       subtaskId,
-      data: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
+      updateData: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
     });
     setEditingAssignmentId(null);
     setTempAssignment({});
@@ -320,6 +348,36 @@ export default function CourseDetailPage() {
   const handleAssignmentCancel = () => {
     setEditingAssignmentId(null);
     setTempAssignment({});
+  };
+
+  // Priority editing handlers
+  const handlePriorityClick = () => {
+    setTempPriority(course.priority || 'medium');
+    setIsEditingPriority(true);
+  };
+
+  const handlePriorityConfirm = () => {
+    updateCourseDetailsMutation.mutate({ priority: tempPriority });
+  };
+
+  const handlePriorityCancel = () => {
+    setIsEditingPriority(false);
+    setTempPriority('');
+  };
+
+  // Owner editing handlers
+  const handleOwnerClick = () => {
+    setTempOwnerId(course.owner?.id || course.ownerId || '');
+    setIsEditingOwner(true);
+  };
+
+  const handleOwnerConfirm = () => {
+    updateCourseDetailsMutation.mutate({ ownerId: tempOwnerId || null });
+  };
+
+  const handleOwnerCancel = () => {
+    setIsEditingOwner(false);
+    setTempOwnerId('');
   };
 
   if (isLoading) {
@@ -441,19 +499,87 @@ export default function CourseDetailPage() {
                   
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Priority</h4>
-                    <Badge className={getPriorityColor(course.priority)}>
-                      {course.priority}
-                    </Badge>
+                    {isEditingPriority ? (
+                      <div className="flex items-center space-x-2">
+                        <select
+                          value={tempPriority}
+                          onChange={(e) => setTempPriority(e.target.value)}
+                          className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="low">Low</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High</option>
+                          <option value="critical">Critical</option>
+                        </select>
+                        <button
+                          onClick={handlePriorityConfirm}
+                          disabled={updateCourseDetailsMutation.isPending}
+                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={handlePriorityCancel}
+                          disabled={updateCourseDetailsMutation.isPending}
+                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handlePriorityClick}
+                        className="hover:opacity-80 transition-opacity"
+                      >
+                        <Badge className={`border-2 border-dashed border-gray-300 dark:border-gray-600 ${getPriorityColor(course.priority)}`}>
+                          {course.priority}
+                        </Badge>
+                      </button>
+                    )}
                   </div>
 
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Owner</h4>
-                    <div className="flex items-center space-x-2">
-                      <Users className="h-4 w-4 text-gray-400" />
-                      <span className="text-gray-700 dark:text-gray-300">
-                        {course.owner ? course.owner.name : 'Not assigned'}
-                      </span>
-                    </div>
+                    {isEditingOwner ? (
+                      <div className="flex items-center space-x-2">
+                        <select
+                          value={tempOwnerId}
+                          onChange={(e) => setTempOwnerId(e.target.value)}
+                          className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="">No owner</option>
+                          {(usersData || []).map(user => (
+                            <option key={user.id} value={user.id}>
+                              {user.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={handleOwnerConfirm}
+                          disabled={updateCourseDetailsMutation.isPending}
+                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={handleOwnerCancel}
+                          disabled={updateCourseDetailsMutation.isPending}
+                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleOwnerClick}
+                        className="flex items-center space-x-2 hover:opacity-80 transition-opacity text-left px-2 py-1 rounded border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+                      >
+                        <Users className="h-4 w-4 text-gray-400" />
+                        <span className="text-gray-700 dark:text-gray-300">
+                          {course.owner ? course.owner.name : 'Not assigned'}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -671,30 +797,62 @@ export default function CourseDetailPage() {
                                           ({getCompletionPercentage(subtask.status)}% complete)
                                         </span>
                                       </div>
-                                      {(subtask.start_date || subtask.finish_date || subtask.assignedUser) && (
-                                        <div className="flex items-center space-x-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                          {subtask.start_date && (
-                                            <div className="flex items-center space-x-1">
-                                              <Calendar className="h-3 w-3" />
-                                              <span>Started: {new Date(subtask.start_date).toLocaleDateString()}</span>
-                                            </div>
-                                          )}
-                                          {subtask.finish_date && (
-                                            <div className="flex items-center space-x-1">
-                                              <CheckCircle className="h-3 w-3" />
-                                              <span>Finished: {new Date(subtask.finish_date).toLocaleDateString()}</span>
-                                            </div>
-                                          )}
-                                          {subtask.assignedUsers && subtask.assignedUsers.length > 0 && (
-                                            <div className="flex items-center space-x-1">
-                                              <Users className="h-3 w-3" />
-                                              <span>
-                                                Assigned to: {subtask.assignedUsers.map(user => user.name).join(', ')}
-                                              </span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
+                                      {(() => {
+                                        // Get current phase status details
+                                        const currentStatusHistory = subtask.status_history?.find(h => h.status === subtask.status);
+                                        const hasDateInfo = subtask.start_date || subtask.finish_date || currentStatusHistory?.started_at || currentStatusHistory?.finished_at;
+                                        const hasAssignees = subtask.assignedUsers && subtask.assignedUsers.length > 0;
+                                        
+                                        return (hasDateInfo || hasAssignees) && (
+                                          <div className="flex flex-col space-y-1 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                            {/* Overall phase dates */}
+                                            {(subtask.start_date || subtask.finish_date) && (
+                                              <div className="flex items-center space-x-4">
+                                                {subtask.start_date && (
+                                                  <div className="flex items-center space-x-1">
+                                                    <Calendar className="h-3 w-3" />
+                                                    <span>Phase Started: {new Date(subtask.start_date).toLocaleDateString()}</span>
+                                                  </div>
+                                                )}
+                                                {subtask.finish_date && (
+                                                  <div className="flex items-center space-x-1">
+                                                    <CheckCircle className="h-3 w-3" />
+                                                    <span>Phase Finished: {new Date(subtask.finish_date).toLocaleDateString()}</span>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                            
+                                            {/* Current status dates */}
+                                            {currentStatusHistory && (currentStatusHistory.started_at || currentStatusHistory.finished_at) && (
+                                              <div className="flex items-center space-x-4">
+                                                {currentStatusHistory.started_at && (
+                                                  <div className="flex items-center space-x-1">
+                                                    <Clock className="h-3 w-3" />
+                                                    <span>Status Started: {new Date(currentStatusHistory.started_at).toLocaleDateString()}</span>
+                                                  </div>
+                                                )}
+                                                {currentStatusHistory.finished_at && (
+                                                  <div className="flex items-center space-x-1">
+                                                    <CheckCircle className="h-3 w-3" />
+                                                    <span>Status Finished: {new Date(currentStatusHistory.finished_at).toLocaleDateString()}</span>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                            
+                                            {/* Assigned users */}
+                                            {hasAssignees && (
+                                              <div className="flex items-center space-x-1">
+                                                <Users className="h-3 w-3" />
+                                                <span>
+                                                  Assigned to: {subtask.assignedUsers.map(user => user.name).join(', ')}
+                                                </span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
                                       <div className="flex items-center space-x-4 mt-1">
                                         {editingPhaseId === subtask.id ? (
                                           <div className="flex items-center space-x-2">
@@ -739,7 +897,7 @@ export default function CourseDetailPage() {
                                         ) : (
                                           <button
                                             onClick={() => handleStatusClick(subtask.id, subtask.status)}
-                                            className={`text-xs px-2.5 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity ${getStatusColor(subtask.status)}`}
+                                            className={`text-xs px-2.5 py-0.5 rounded font-medium hover:opacity-80 transition-opacity border-2 border-dashed border-gray-300 dark:border-gray-600 ${getStatusColor(subtask.status)}`}
                                           >
                                             {(() => {
                                               const foundStatus = phaseStatusesData?.find(s => s.value === subtask.status);
@@ -875,7 +1033,7 @@ export default function CourseDetailPage() {
                     onClick={() => setIsEditingCourseStatus(true)}
                     title="Click to change status"
                   >
-                    <Badge className={statusInfo.color}>
+                    <Badge className={`border-2 border-dashed border-gray-300 dark:border-gray-600 ${statusInfo.color}`}>
                       {statusInfo.label}
                     </Badge>
                     <Edit className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
