@@ -18,7 +18,6 @@ const createCourseSchema = Joi.object({
     then: Joi.array().min(1).required(),
     otherwise: Joi.optional()
   }),
-  type: Joi.string().valid('standard', 'compliance', 'certification').default('standard'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
   ownerId: Joi.number().integer().positive().optional(),
   startDate: Joi.date().optional(),
@@ -42,7 +41,6 @@ const createCourseSchema = Joi.object({
 const updateCourseSchema = Joi.object({
   title: Joi.string().min(3).max(255).optional().trim(),
   description: Joi.string().max(2000).optional().allow(''),
-  type: Joi.string().valid('standard', 'compliance', 'certification').optional(),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').optional(),
   status: Joi.string().max(50).optional(),
   ownerId: Joi.number().integer().positive().optional(),

@@ -150,7 +150,12 @@ export default function CourseForm({ courseId = null }) {
       navigate('/courses');
     },
     onError: (error) => {
-      toast.error(error.response?.data?.error?.message || 'Failed to create course');
+      console.error('Course creation error:', error.response?.data);
+      const errorMessage = error.response?.data?.error?.message || 
+                          error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          'Failed to create course';
+      toast.error(typeof errorMessage === 'string' ? errorMessage : 'Failed to create course');
     }
   });
 
@@ -281,6 +286,8 @@ export default function CourseForm({ courseId = null }) {
       submitData.estimatedDailyHours = parseFloat(formData.estimatedDailyHours);
     }
 
+    console.log('Submitting course data:', submitData);
+    
     if (isEditing) {
       updateMutation.mutate(submitData);
     } else {
