@@ -5,6 +5,7 @@ const logger = require('../utils/logger');
 
 const authenticate = async (req, res, next) => {
   try {
+    
     // Extract token from Authorization header
     const authHeader = req.headers.authorization;
     

@@ -20,6 +20,7 @@ const createCourseSchema = Joi.object({
   }),
   type: Joi.string().valid('standard', 'compliance', 'certification').default('standard'),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
+  ownerId: Joi.number().integer().positive().optional(),
   startDate: Joi.date().optional(),
   dueDate: Joi.date().optional().allow('').when('startDate', {
     is: Joi.exist(),
@@ -44,6 +45,7 @@ const updateCourseSchema = Joi.object({
   type: Joi.string().valid('standard', 'compliance', 'certification').optional(),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').optional(),
   status: Joi.string().max(50).optional(),
+  ownerId: Joi.number().integer().positive().optional(),
   startDate: Joi.date().optional(),
   dueDate: Joi.date().optional(),
   estimatedHours: Joi.number().integer().min(1).max(1000).optional(),
@@ -59,7 +61,8 @@ const createSubtaskSchema = (validStatuses = ['pending', 'in_progress', 'complet
     isBlocking: Joi.boolean().default(false),
     weight: Joi.number().integer().min(1).max(100).default(1),
     orderIndex: Joi.number().integer().min(1).optional(),
-    assignedUserId: Joi.number().integer().positive().optional()
+    assignedUserId: Joi.number().integer().positive().optional(),
+    assignedUserIds: Joi.array().items(Joi.number().integer().positive()).optional()
   });
 };
 
@@ -91,6 +94,11 @@ class CourseController {
    * GET /courses - List courses with filters
    */
   getCourses = asyncHandler(async (req, res) => {
+    console.log('=== getCourses CALLED ===');
+    console.log('Query params:', JSON.stringify(req.query, null, 2));
+    console.log('User:', req.user?.email);
+    
+    try {
     const {
       status,
       type,
@@ -103,8 +111,27 @@ class CourseController {
       page = 1,
       limit = 20,
       sort = 'due_date',
-      order = 'ASC'
+      order = 'ASC',
+      sortBy,
+      sortOrder
     } = req.query;
+
+    // Handle both sort/order and sortBy/sortOrder parameter formats
+    const requestedSort = sortBy || sort || 'due_date';
+    const finalOrder = (sortOrder || order || 'ASC').toUpperCase();
+
+    // Map sort fields to valid database columns (with table alias)
+    const sortFieldMap = {
+      'due_date': 'c.due_date',
+      'created_at': 'c.created_at',
+      'updated_at': 'c.updated_at',
+      'title': 'c.title',
+      'priority': 'c.priority',
+      'status': 'c.status',
+      'start_date': 'c.start_date'
+    };
+
+    const finalSort = sortFieldMap[requestedSort] || 'c.due_date';
 
     // Build filters
     const filters = {};
@@ -162,7 +189,10 @@ class CourseController {
 
     // Pagination and ordering
     const { limit: finalLimit, offset } = buildPaginationClause(parseInt(page), parseInt(limit));
-    const orderClause = buildOrderClause(sort, order);
+    // Since we already have the properly formatted sort field, create order clause directly
+    const allowedOrders = ['ASC', 'DESC'];
+    const safeOrder = allowedOrders.includes(finalOrder) ? finalOrder : 'ASC';
+    const orderClause = `ORDER BY ${finalSort} ${safeOrder}`;
 
     // Get total count (with same JOINs for consistent filtering)
     const countResult = await query(`
@@ -183,6 +213,11 @@ class CourseController {
         wi.current_state as workflow_state,
         wi.state_entered_at,
         wt.name as workflow_template_name,
+        jsonb_build_object(
+          'id', owner.id,
+          'name', owner.name,
+          'email', owner.email
+        ) as owner,
         array_agg(
           DISTINCT jsonb_build_object(
             'userId', ca.user_id,
@@ -195,10 +230,11 @@ class CourseController {
       FROM courses c
       LEFT JOIN workflow_instances wi ON c.id = wi.course_id AND wi.is_complete = false
       LEFT JOIN workflow_templates wt ON wi.workflow_template_id = wt.id
+      LEFT JOIN users owner ON c.owner_id = owner.id
       LEFT JOIN course_assignments ca ON c.id = ca.course_id
       LEFT JOIN users u ON ca.user_id = u.id
       ${whereClause}
-      GROUP BY c.id, wi.current_state, wi.state_entered_at, wt.name
+      GROUP BY c.id, wi.current_state, wi.state_entered_at, wt.name, owner.id, owner.name, owner.email
       ${orderClause}
       LIMIT $${++paramCount} OFFSET $${++paramCount}
     `, [...values, finalLimit, offset]);
@@ -218,6 +254,12 @@ class CourseController {
         }
       }
     });
+    } catch (error) {
+      console.log('=== ERROR IN getCourses ===');
+      console.log('Error:', error.message);
+      console.log('Stack:', error.stack);
+      throw error;
+    }
   });
 
   /**
@@ -237,6 +279,7 @@ class CourseController {
       deliverables = [],
       type,
       priority,
+      ownerId,
       startDate,
       dueDate,
       estimatedHours,
@@ -263,13 +306,13 @@ class CourseController {
       // Create course
       const courseResult = await client.query(`
         INSERT INTO courses (
-          title, description, modality, type, priority, status, start_date, due_date,
+          title, description, modality, type, priority, status, owner_id, start_date, due_date,
           estimated_hours, estimated_daily_hours, metadata, created_by, updated_by,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, 'pre_development', $6, $7, $8, $9, $10, $11, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, 'pre_development', $6, $7, $8, $9, $10, $11, $12, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `, [
-        title, description, modality, type, priority, startDate, dueDate,
+        title, description, modality, type, priority, ownerId || req.user.id, startDate, dueDate,
         estimatedHours, estimatedDailyHours, JSON.stringify(metadata || {}),
         req.user.id
       ]);
@@ -463,6 +506,11 @@ class CourseController {
         wi.state_data,
         wt.name as workflow_template_name,
         wt.id as workflow_template_id,
+        jsonb_build_object(
+          'id', owner.id,
+          'name', owner.name,
+          'email', owner.email
+        ) as owner,
         json_agg(
           DISTINCT jsonb_build_object(
             'userId', ca.user_id,
@@ -489,6 +537,7 @@ class CourseController {
       FROM courses c
       LEFT JOIN workflow_instances wi ON c.id = wi.course_id AND wi.is_complete = false
       LEFT JOIN workflow_templates wt ON wi.workflow_template_id = wt.id
+      LEFT JOIN users owner ON c.owner_id = owner.id
       LEFT JOIN course_assignments ca ON c.id = ca.course_id
       LEFT JOIN users u ON ca.user_id = u.id
       LEFT JOIN course_dependencies cd ON c.id = cd.course_id
@@ -496,7 +545,7 @@ class CourseController {
       LEFT JOIN course_deliverables cdeliv ON c.id = cdeliv.course_id
       LEFT JOIN deliverables d ON cdeliv.deliverable_id = d.id
       WHERE c.id = $1
-      GROUP BY wi.state_entered_at, wi.state_data, wt.name, wt.id, c.updated_at
+      GROUP BY wi.state_entered_at, wi.state_data, wt.name, wt.id, c.updated_at, owner.id, owner.name, owner.email
     `, [id]);
 
     // Combine base course data with additional data
@@ -508,6 +557,7 @@ class CourseController {
       state_data: additionalData.state_data,
       workflow_template_name: additionalData.workflow_template_name,
       workflow_template_id: additionalData.workflow_template_id,
+      owner: additionalData.owner,
       assignments: additionalData.assignments || [],
       dependencies: additionalData.dependencies || [],
       deliverables: additionalData.deliverables || []
@@ -589,7 +639,7 @@ class CourseController {
 
     // Track changes
     const changes = {};
-    const allowedFields = ['title', 'description', 'type', 'priority', 'status', 'startDate', 'dueDate', 'estimatedHours', 'estimatedDailyHours', 'metadata'];
+    const allowedFields = ['title', 'description', 'type', 'priority', 'status', 'ownerId', 'startDate', 'dueDate', 'estimatedHours', 'estimatedDailyHours', 'metadata'];
     
     allowedFields.forEach(field => {
       const dbField = field.replace(/([A-Z])/g, '_$1').toLowerCase();

@@ -125,7 +125,7 @@ class SubtaskService {
       const courseId = currentSubtask.course_id;
 
       // Prepare update data
-      const allowedFields = ['title', 'status', 'is_blocking', 'weight', 'order_index'];
+      const allowedFields = ['title', 'status', 'is_blocking', 'weight', 'order_index', 'assigned_user_id', 'assigned_at', 'assigned_by'];
       const updates = {};
       const changes = {};
 
@@ -141,6 +141,21 @@ class SubtaskService {
           }
         }
       });
+
+      // Handle assignment logic for multiple users
+      if (updateData.assignedUserIds !== undefined) {
+        // This will be handled separately in the transaction
+        changes.assignmentUpdate = {
+          newAssignedUserIds: updateData.assignedUserIds,
+          assignedBy: userId
+        };
+      } else if (updateData.assignedUserId !== undefined) {
+        // Backward compatibility for single user assignment
+        changes.assignmentUpdate = {
+          newAssignedUserIds: updateData.assignedUserId ? [updateData.assignedUserId] : [],
+          assignedBy: userId
+        };
+      }
 
       // Handle completion timestamp
       if (updates.status === 'completed' && currentSubtask.status !== 'completed') {
@@ -313,6 +328,59 @@ class SubtaskService {
               });
             }
           }
+        }
+
+        // Handle assignment updates
+        if (changes.assignmentUpdate) {
+          const { newAssignedUserIds, assignedBy } = changes.assignmentUpdate;
+          
+          // Get current assignments
+          const currentAssignmentsResult = await client.query(`
+            SELECT user_id FROM subtask_assignments WHERE subtask_id = $1
+          `, [subtaskId]);
+          
+          const currentUserIds = currentAssignmentsResult.rows.map(row => row.user_id);
+          const newUserIds = newAssignedUserIds || [];
+          
+          // Find users to add and remove
+          const usersToAdd = newUserIds.filter(uid => !currentUserIds.includes(uid));
+          const usersToRemove = currentUserIds.filter(uid => !newUserIds.includes(uid));
+          
+          // Remove assignments
+          if (usersToRemove.length > 0) {
+            await client.query(`
+              DELETE FROM subtask_assignments 
+              WHERE subtask_id = $1 AND user_id = ANY($2)
+            `, [subtaskId, usersToRemove]);
+            
+            logger.info('Removed user assignments', {
+              subtaskId,
+              removedUsers: usersToRemove,
+              removedBy: assignedBy
+            });
+          }
+          
+          // Add new assignments
+          for (const userIdToAdd of usersToAdd) {
+            await client.query(`
+              INSERT INTO subtask_assignments (subtask_id, user_id, assigned_by, assigned_at)
+              VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            `, [subtaskId, userIdToAdd, assignedBy]);
+          }
+          
+          if (usersToAdd.length > 0) {
+            logger.info('Added user assignments', {
+              subtaskId,
+              addedUsers: usersToAdd,
+              assignedBy
+            });
+          }
+          
+          changes.assignmentChanges = {
+            added: usersToAdd,
+            removed: usersToRemove,
+            assignedBy
+          };
         }
 
         // Log the update
@@ -497,26 +565,43 @@ class SubtaskService {
 
       const result = await query(`
         SELECT 
-          id,
-          course_id,
-          title,
-          status,
-          is_blocking,
-          weight,
-          order_index,
-          completed_at,
-          start_date,
-          finish_date,
-          created_at,
-          updated_at
-        FROM course_subtasks
+          cs.id,
+          cs.course_id,
+          cs.title,
+          cs.status,
+          cs.is_blocking,
+          cs.weight,
+          cs.order_index,
+          cs.completed_at,
+          cs.start_date,
+          cs.finish_date,
+          cs.created_at,
+          cs.updated_at
+        FROM course_subtasks cs
         ${whereClause}
         ${orderClause}
       `, params);
 
-      // Get status history for each subtask
-      const subtasks = result.rows;
+      // Get status history and assignments for each subtask
+      const subtasks = result.rows.map(subtask => {
+        return {
+          id: subtask.id,
+          course_id: subtask.course_id,
+          title: subtask.title,
+          status: subtask.status,
+          is_blocking: subtask.is_blocking,
+          weight: subtask.weight,
+          order_index: subtask.order_index,
+          completed_at: subtask.completed_at,
+          start_date: subtask.start_date,
+          finish_date: subtask.finish_date,
+          created_at: subtask.created_at,
+          updated_at: subtask.updated_at
+        };
+      });
+
       for (const subtask of subtasks) {
+        // Get status history
         const historyResult = await query(`
           SELECT id, status, started_at, finished_at
           FROM phase_status_history
@@ -525,6 +610,36 @@ class SubtaskService {
         `, [subtask.id]);
         
         subtask.status_history = historyResult.rows;
+
+        // Get assigned users
+        const assignmentsResult = await query(`
+          SELECT 
+            sa.user_id,
+            sa.assigned_at,
+            sa.assigned_by,
+            u.name as user_name,
+            u.email as user_email,
+            assigner.name as assigned_by_name
+          FROM subtask_assignments sa
+          JOIN users u ON sa.user_id = u.id
+          LEFT JOIN users assigner ON sa.assigned_by = assigner.id
+          WHERE sa.subtask_id = $1
+          ORDER BY sa.assigned_at ASC
+        `, [subtask.id]);
+
+        subtask.assignedUsers = assignmentsResult.rows.map(assignment => ({
+          id: assignment.user_id,
+          name: assignment.user_name,
+          email: assignment.user_email,
+          assignedAt: assignment.assigned_at,
+          assignedBy: assignment.assigned_by ? {
+            id: assignment.assigned_by,
+            name: assignment.assigned_by_name
+          } : null
+        }));
+
+        // Backward compatibility: set assignedUser to first user if any
+        subtask.assignedUser = subtask.assignedUsers.length > 0 ? subtask.assignedUsers[0] : null;
       }
 
       return subtasks;

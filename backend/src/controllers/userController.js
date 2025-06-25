@@ -14,6 +14,12 @@ const updateUserSchema = Joi.object({
   role: Joi.string().valid('admin', 'manager', 'designer', 'reviewer', 'viewer').optional(),
   teamId: Joi.number().integer().positive().allow(null).optional(),
   active: Joi.boolean().optional(),
+  phone: Joi.string().max(20).allow('').optional(),
+  location: Joi.string().max(100).allow('').optional(),
+  bio: Joi.string().max(500).allow('').optional(),
+  website: Joi.string().uri().allow('').optional(),
+  linkedIn: Joi.string().max(200).allow('').optional(),
+  timezone: Joi.string().max(50).optional(),
   notificationPreferences: Joi.object({
     email: Joi.boolean(),
     inApp: Joi.boolean(),
@@ -164,6 +170,12 @@ class UserController {
         u.team_id,
         u.daily_capacity_hours,
         u.notification_preferences,
+        u.phone,
+        u.location,
+        u.bio,
+        u.website,
+        u.linkedin,
+        u.timezone,
         u.created_at,
         u.last_login,
         t.name as team_name,
@@ -210,6 +222,12 @@ class UserController {
       teamManagerName: user.team_manager_name,
       dailyCapacityHours: user.daily_capacity_hours,
       notificationPreferences: user.notification_preferences || {},
+      phone: user.phone,
+      location: user.location,
+      bio: user.bio,
+      website: user.website,
+      linkedIn: user.linkedin,
+      timezone: user.timezone,
       statistics: {
         totalAssignments: parseInt(stats.total_assignments),
         completedCourses: parseInt(stats.completed_courses),
@@ -386,7 +404,8 @@ class UserController {
    * PUT /users/:id - Update user
    */
   updateUser = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    // For /users/current route, use the authenticated user's ID
+    const id = req.params.id || req.user.id;
 
     // Check authorization
     if (req.user.role !== 'admin' && req.user.id !== parseInt(id)) {
@@ -394,10 +413,18 @@ class UserController {
     }
 
     // Validate input
+    console.log('=== PROFILE UPDATE DEBUG ===');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('User ID:', id);
+    console.log('User role:', req.user.role);
+    
     const { error, value } = updateUserSchema.validate(req.body);
     if (error) {
+      console.log('Validation error:', JSON.stringify(error.details, null, 2));
       throw new ValidationError('Invalid update data', error.details);
     }
+    
+    console.log('Validated value:', JSON.stringify(value, null, 2));
 
     // Non-admins cannot change their own role or team
     if (req.user.role !== 'admin') {
@@ -436,6 +463,9 @@ class UserController {
         } else if (key === 'notificationPreferences') {
           updates.push(`notification_preferences = $${++paramCount}`);
           params.push(JSON.stringify(val));
+        } else if (key === 'linkedIn') {
+          updates.push(`linkedin = $${++paramCount}`);
+          params.push(val);
         } else {
           updates.push(`${key} = $${++paramCount}`);
           params.push(val);
@@ -772,7 +802,7 @@ class UserController {
       throw new AuthorizationError('Cannot update this profile');
     }
 
-    const { error } = userUpdateSchema.validate(req.body);
+    const { error } = updateUserSchema.validate(req.body);
     if (error) {
       throw new ValidationError('Invalid update data', error.details);
     }
