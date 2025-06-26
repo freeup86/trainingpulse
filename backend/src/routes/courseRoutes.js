@@ -25,6 +25,9 @@ router.delete('/:id/subtasks/:subtaskId', authorizeResource('course'), courseCon
 // Phase status history operations
 router.put('/:id/subtasks/:subtaskId/phase-history/:historyId', authorizeResource('course'), courseController.updatePhaseStatusHistory);
 
+// Archived phase data
+router.get('/:id/archived-phases', authorizeResource('course'), courseController.getArchivedPhaseData);
+
 // Status operations
 router.get('/:id/status', authorizeResource('course'), courseController.getCourseStatus);
 router.post('/:id/recalculate-status', authorize(['admin', 'manager']), courseController.recalculateStatus);

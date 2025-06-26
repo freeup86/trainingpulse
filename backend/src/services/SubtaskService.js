@@ -19,7 +19,7 @@ class SubtaskService {
     try {
       const {
         title,
-        status = 'alpha_review', // Start with alpha_review instead of pending
+        status = '', // Start with blank status
         isBlocking = false,
         weight = 1,
         orderIndex
@@ -51,13 +51,6 @@ class SubtaskService {
         `, [courseId, title, status, isBlocking, weight, finalOrderIndex]);
 
         const newSubtask = result.rows[0];
-
-        // Auto-create Alpha Review phase status history entry
-        // Every new phase starts in Alpha Review
-        await client.query(`
-          INSERT INTO phase_status_history (subtask_id, status, started_at, created_at, updated_at)
-          VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `, [newSubtask.id, 'alpha_review']);
 
         // Log the creation
         await client.query(`
@@ -168,31 +161,50 @@ class SubtaskService {
       }
 
       // Handle phase start and finish dates
-      const statusChanged = updates.status && updates.status !== currentSubtask.status;
+      const statusChanged = updates.status !== undefined && updates.status !== currentSubtask.status;
       if (statusChanged) {
         const oldStatus = currentSubtask.status;
         const newStatus = updates.status;
         
-        // Set start_date when moving from 'pending' to any active status
-        if (oldStatus === 'pending' && newStatus !== 'pending' && !currentSubtask.start_date) {
-          updates.start_date = new Date();
-          changes.start_date = { from: null, to: updates.start_date };
-        }
+        console.log('DEBUG: Status change detected', {
+          subtaskId,
+          oldStatus: `"${oldStatus}"`,
+          newStatus: `"${newStatus}"`,
+          oldStatusType: typeof oldStatus,
+          newStatusType: typeof newStatus
+        });
         
-        // Set finish_date when moving to completion statuses
-        const completionStatuses = ['final', 'completed'];
-        const wasNotCompleted = !completionStatuses.includes(oldStatus);
-        const isNowCompleted = completionStatuses.includes(newStatus);
-        
-        if (wasNotCompleted && isNowCompleted && !currentSubtask.finish_date) {
-          updates.finish_date = new Date();
-          changes.finish_date = { from: null, to: updates.finish_date };
-        }
-        
-        // Clear finish_date if moving away from completion status
-        if (completionStatuses.includes(oldStatus) && !completionStatuses.includes(newStatus)) {
+        // Special case: If changing to "No Status" (empty string), clear all dates immediately
+        if (newStatus === '') {
+          console.log('DEBUG: Clearing dates because newStatus is empty string');
+          updates.start_date = null;
           updates.finish_date = null;
+          updates.completed_at = null;
+          changes.start_date = { from: currentSubtask.start_date, to: null };
           changes.finish_date = { from: currentSubtask.finish_date, to: null };
+          changes.completed_at = { from: currentSubtask.completed_at, to: null };
+        } else {
+          // Set start_date when moving from 'pending' to any active status
+          if (oldStatus === 'pending' && newStatus !== 'pending' && !currentSubtask.start_date) {
+            updates.start_date = new Date();
+            changes.start_date = { from: null, to: updates.start_date };
+          }
+          
+          // Set finish_date when moving to completion statuses
+          const completionStatuses = ['final', 'completed'];
+          const wasNotCompleted = !completionStatuses.includes(oldStatus);
+          const isNowCompleted = completionStatuses.includes(newStatus);
+          
+          if (wasNotCompleted && isNowCompleted && !currentSubtask.finish_date) {
+            updates.finish_date = new Date();
+            changes.finish_date = { from: null, to: updates.finish_date };
+          }
+          
+          // Clear finish_date if moving away from completion status
+          if (completionStatuses.includes(oldStatus) && !completionStatuses.includes(newStatus)) {
+            updates.finish_date = null;
+            changes.finish_date = { from: currentSubtask.finish_date, to: null };
+          }
         }
         
         // Track status history for detailed phase tracking
@@ -250,11 +262,70 @@ class SubtaskService {
             userId
           });
           
+          // Special case: If changing to "No Status" (empty string), clear all phase status history and dates
+          if (newStatus === '') {
+            console.log('DEBUG: Clearing all phase status history and dates for subtask', subtaskId);
+            
+            // Clear all phase status history
+            const clearResult = await client.query(`
+              DELETE FROM phase_status_history 
+              WHERE subtask_id = $1
+              RETURNING *
+            `, [subtaskId]);
+            
+            console.log('DEBUG: Cleared phase status history records:', clearResult.rows);
+            
+            // Clear all phase dates on the subtask itself
+            const clearDatesResult = await client.query(`
+              UPDATE course_subtasks 
+              SET start_date = NULL, finish_date = NULL, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $1
+              RETURNING *
+            `, [subtaskId]);
+            
+            console.log('DEBUG: Cleared phase dates on subtask:', clearDatesResult.rows[0]);
+            
+            logger.info('Cleared all phase status history and dates for No Status', {
+              subtaskId,
+              oldStatus,
+              deletedRecords: clearResult.rows.length,
+              deletedEntries: clearResult.rows,
+              clearedDates: {
+                start_date: clearDatesResult.rows[0]?.start_date,
+                finish_date: clearDatesResult.rows[0]?.finish_date,
+                completed_at: clearDatesResult.rows[0]?.completed_at
+              }
+            });
+            
+            return; // Exit early, no need to process further status logic
+          }
+          
           // Define phase hierarchy for backward movement detection
-          const phaseHierarchy = ['alpha_review', 'beta_review', 'final'];
+          const phaseHierarchy = ['alpha_review', 'beta_review', 'final', 'final_signoff'];
           const oldIndex = phaseHierarchy.indexOf(oldStatus);
           const newIndex = phaseHierarchy.indexOf(newStatus);
           const isBackwardMovement = oldIndex > newIndex && oldIndex !== -1 && newIndex !== -1;
+          
+          // Special handling for Final Signoff status
+          if (newStatus === 'final_signoff' && oldStatus === 'final') {
+            console.log('DEBUG: Moving to Final Signoff - setting final end date and final signoff date');
+            
+            // Set the finish date for the Final (Gold) phase in phase_status_history
+            await client.query(`
+              UPDATE phase_status_history 
+              SET finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+              WHERE subtask_id = $1 AND status = 'final' AND finished_at IS NULL
+            `, [subtaskId]);
+            
+            // Set the finish_date on the subtask itself (this represents Final Gold completion)
+            updates.finish_date = new Date();
+            changes.finish_date = { from: currentSubtask.finish_date, to: updates.finish_date };
+            
+            logger.info('Set Final Gold completion dates for Final Signoff transition', {
+              subtaskId,
+              finalGoldFinishDate: updates.finish_date
+            });
+          }
           
           logger.info('Phase transition analysis', {
             subtaskId,

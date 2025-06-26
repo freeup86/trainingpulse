@@ -30,6 +30,7 @@ const roleRoutes = require('./routes/roleRoutes');
 const phaseStatusRoutes = require('./routes/phaseStatusRoutes');
 const permissionRoutes = require('./routes/permissionRoutes');
 const userPermissionRoutes = require('./routes/userPermissionRoutes');
+const modalityRoutes = require('./routes/modalityRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -85,9 +86,23 @@ if (process.env.ENABLE_REQUEST_LOGGING === 'true') {
 }
 
 // Rate limiting
-const limiter = rateLimit({
+const publicLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Too many requests from this IP'
+    }
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authenticatedLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute
+  max: parseInt(process.env.AUTHENTICATED_RATE_LIMIT_MAX_REQUESTS) || 500, // Much higher limit for authenticated users
   message: {
     success: false,
     error: {
@@ -111,7 +126,8 @@ const bulkLimiter = rateLimit({
   }
 });
 
-app.use(limiter);
+// Apply public rate limiter to all routes initially
+app.use(publicLimiter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -129,19 +145,20 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use(`/api/${API_VERSION}/auth`, authRoutes);
-app.use(`/api/${API_VERSION}/users`, authenticate, userRoutes);
-app.use(`/api/${API_VERSION}/teams`, authenticate, teamRoutes);
-app.use(`/api/${API_VERSION}/courses`, authenticate, courseRoutes);
-app.use(`/api/${API_VERSION}/workflows`, authenticate, workflowRoutes);
-app.use(`/api/${API_VERSION}/analytics`, authenticate, analyticsRoutes);
+app.use(`/api/${API_VERSION}/users`, authenticate, authenticatedLimiter, userRoutes);
+app.use(`/api/${API_VERSION}/teams`, authenticate, authenticatedLimiter, teamRoutes);
+app.use(`/api/${API_VERSION}/courses`, authenticate, authenticatedLimiter, courseRoutes);
+app.use(`/api/${API_VERSION}/workflows`, authenticate, authenticatedLimiter, workflowRoutes);
+app.use(`/api/${API_VERSION}/analytics`, authenticate, authenticatedLimiter, analyticsRoutes);
 app.use(`/api/${API_VERSION}/bulk`, authenticate, bulkLimiter, bulkRoutes);
-app.use(`/api/${API_VERSION}/notifications`, authenticate, notificationRoutes);
-app.use(`/api/${API_VERSION}/settings`, authenticate, settingsRoutes);
-app.use(`/api/${API_VERSION}/statuses`, authenticate, statusRoutes);
-app.use(`/api/${API_VERSION}/phase-statuses`, authenticate, phaseStatusRoutes);
-app.use(`/api/${API_VERSION}/roles`, authenticate, roleRoutes);
-app.use(`/api/${API_VERSION}/permissions`, authenticate, permissionRoutes);
-app.use(`/api/${API_VERSION}/user-permissions`, authenticate, userPermissionRoutes);
+app.use(`/api/${API_VERSION}/notifications`, authenticate, authenticatedLimiter, notificationRoutes);
+app.use(`/api/${API_VERSION}/settings`, authenticate, authenticatedLimiter, settingsRoutes);
+app.use(`/api/${API_VERSION}/statuses`, authenticate, authenticatedLimiter, statusRoutes);
+app.use(`/api/${API_VERSION}/phase-statuses`, authenticate, authenticatedLimiter, phaseStatusRoutes);
+app.use(`/api/${API_VERSION}/roles`, authenticate, authenticatedLimiter, roleRoutes);
+app.use(`/api/${API_VERSION}/permissions`, authenticate, authenticatedLimiter, permissionRoutes);
+app.use(`/api/${API_VERSION}/user-permissions`, authenticate, authenticatedLimiter, userPermissionRoutes);
+app.use(`/api/${API_VERSION}/modality`, authenticate, authenticatedLimiter, modalityRoutes);
 
 // API documentation endpoint
 app.get(`/api/${API_VERSION}`, (req, res) => {

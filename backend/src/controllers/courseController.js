@@ -52,10 +52,10 @@ const updateCourseSchema = Joi.object({
 });
 
 // Dynamic subtask schema that will be updated with valid phase statuses
-const createSubtaskSchema = (validStatuses = ['pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
+const createSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
   return Joi.object({
     title: Joi.string().min(1).max(255).required().trim(),
-    status: Joi.string().valid(...validStatuses).default('pending'),
+    status: Joi.string().valid(...validStatuses).default(''),
     isBlocking: Joi.boolean().default(false),
     weight: Joi.number().integer().min(1).max(100).default(1),
     orderIndex: Joi.number().integer().min(1).optional(),
@@ -64,7 +64,7 @@ const createSubtaskSchema = (validStatuses = ['pending', 'in_progress', 'complet
   });
 };
 
-const updateSubtaskSchema = (validStatuses = ['pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
+const updateSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
   return Joi.object({
     title: Joi.string().min(1).max(255).optional().trim(),
     status: Joi.string().valid(...validStatuses).optional(),
@@ -92,11 +92,16 @@ class CourseController {
         ORDER BY sort_order ASC
       `);
       const statuses = result.rows.map(row => row.value);
-      // Include legacy statuses for backward compatibility
-      return [...new Set([...statuses, 'pending', 'in_progress', 'completed', 'on_hold'])];
+      // Include legacy statuses for backward compatibility, and empty string for new phases
+      const validStatuses = [...new Set(['', ...statuses, 'pending', 'in_progress', 'completed', 'on_hold'])];
+      console.log('DEBUG: Valid phase statuses loaded:', validStatuses);
+      return validStatuses;
     } catch (error) {
+      console.error('DEBUG: Error loading phase statuses from DB:', error.message);
       // Fallback to hardcoded statuses if phase_statuses table doesn't exist
-      return ['pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final'];
+      const fallbackStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final', 'final_signoff'];
+      console.log('DEBUG: Using fallback statuses:', fallbackStatuses);
+      return fallbackStatuses;
     }
   }
 
@@ -360,30 +365,12 @@ class CourseController {
         `, [newCourse.id, assignment.userId, assignment.role, req.user.id]);
       }
 
-      // Auto-assign deliverables based on modality
-      if (modality === 'WBT') {
-        // For WBT, use user-selected deliverables
-        for (const deliverableId of deliverables) {
-          await client.query(`
-            INSERT INTO course_deliverables (course_id, deliverable_id)
-            VALUES ($1, $2)
-          `, [newCourse.id, deliverableId]);
-        }
-      } else {
-        // For other modalities, auto-assign deliverables
-        const autoDeliverables = await client.query(`
-          SELECT d.id
-          FROM deliverables d
-          INNER JOIN modality_deliverables md ON d.id = md.deliverable_id
-          WHERE md.modality = $1 AND md.is_optional = false
-        `, [modality]);
-
-        for (const deliverable of autoDeliverables.rows) {
-          await client.query(`
-            INSERT INTO course_deliverables (course_id, deliverable_id)
-            VALUES ($1, $2)
-          `, [newCourse.id, deliverable.id]);
-        }
+      // Use user-selected deliverables for all modalities
+      for (const deliverableId of deliverables) {
+        await client.query(`
+          INSERT INTO course_deliverables (course_id, deliverable_id)
+          VALUES ($1, $2)
+        `, [newCourse.id, deliverableId]);
       }
 
       // Auto-create tasks based on modality
@@ -399,7 +386,7 @@ class CourseController {
         const subtaskResult = await client.query(`
           INSERT INTO course_subtasks (
             course_id, title, task_type, status, is_blocking, weight, order_index, created_at, updated_at
-          ) VALUES ($1, $2, $3, 'alpha_review', $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          ) VALUES ($1, $2, $3, '', $4, $5, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           RETURNING *
         `, [
           newCourse.id,
@@ -411,12 +398,6 @@ class CourseController {
         ]);
 
         const newSubtask = subtaskResult.rows[0];
-
-        // Auto-create Alpha Review phase status history entry
-        await client.query(`
-          INSERT INTO phase_status_history (subtask_id, status, started_at, created_at, updated_at)
-          VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `, [newSubtask.id, 'alpha_review']);
       }
 
       // Create audit log
@@ -735,6 +716,40 @@ class CourseController {
   });
 
   /**
+   * GET /courses/:id/archived-phases - Get archived phase data for a course
+   */
+  getArchivedPhaseData = asyncHandler(async (req, res) => {
+    const { id: courseId } = req.params;
+    const { courseStatus } = req.query;
+
+    // Build query
+    let queryText = `
+      SELECT 
+        cpa.*,
+        u.name as archived_by_name
+      FROM course_phase_archives cpa
+      LEFT JOIN users u ON cpa.archived_by = u.id
+      WHERE cpa.course_id = $1
+    `;
+    const queryParams = [courseId];
+    
+    // Filter by specific course status if provided
+    if (courseStatus) {
+      queryText += ' AND cpa.course_status = $2';
+      queryParams.push(courseStatus);
+    }
+    
+    queryText += ' ORDER BY cpa.archived_at DESC';
+    
+    const result = await query(queryText, queryParams);
+    
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  });
+
+  /**
    * DELETE /courses/:id - Delete course (soft delete)
    */
   deleteCourse = asyncHandler(async (req, res) => {
@@ -836,9 +851,13 @@ class CourseController {
     const subtaskSchema = updateSubtaskSchema(validStatuses);
 
     // Validate input
+    console.log('DEBUG: Validating subtask update with body:', req.body);
+    console.log('DEBUG: Valid statuses for validation:', validStatuses);
     const { error, value } = subtaskSchema.validate(req.body);
     if (error) {
       console.log('Validation failed:', error.details);
+      console.log('DEBUG: Attempted status:', req.body.status);
+      console.log('DEBUG: Valid statuses:', validStatuses);
       throw new ValidationError('Invalid subtask data', error.details);
     }
 
