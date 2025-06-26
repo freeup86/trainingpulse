@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { ArrowLeft, Save, Calendar, Clock, AlertTriangle, Trash2, Package, CheckCircle } from 'lucide-react';
-import { courses, users, teams, statuses } from '../lib/api';
+import { courses, users, teams } from '../lib/api';
 
 const MODALITIES = [
   { value: 'WBT', label: 'WBT (Web-Based Training)' },
@@ -56,7 +56,6 @@ export default function CourseForm({ courseId = null }) {
     modality: '',
     deliverables: [],
     priority: 'medium',
-    status: 'pre_development',
     ownerId: '',
     startDate: '',
     dueDate: '',
@@ -100,14 +99,6 @@ export default function CourseForm({ courseId = null }) {
     }
   });
 
-  // Fetch statuses for status selection
-  const { data: statusesData } = useQuery({
-    queryKey: ['statuses'],
-    queryFn: async () => {
-      const response = await statuses.getAll();
-      return response.data;
-    }
-  });
 
   // Fetch users for owner selection
   const { data: usersData } = useQuery({
@@ -129,7 +120,6 @@ export default function CourseForm({ courseId = null }) {
         modality: course.modality || '',
         deliverables: course.deliverables?.map(d => d.id) || [],
         priority: course.priority || 'medium',
-        status: course.status || 'pre_development',
         ownerId: course.owner?.id || course.owner_id || '',
         startDate: course.start_date ? course.start_date.split('T')[0] : '',
         dueDate: course.due_date ? course.due_date.split('T')[0] : '',
@@ -266,10 +256,6 @@ export default function CourseForm({ courseId = null }) {
       workflowTemplateId: formData.workflowTemplateId
     };
 
-    // Only include status for updates, not for creation
-    if (isEditing) {
-      submitData.status = formData.status;
-    }
 
     // Add ownerId if provided
     if (formData.ownerId) {
@@ -309,9 +295,9 @@ export default function CourseForm({ courseId = null }) {
     return modalityData?.deliverables || getDeliverablesForModality(formData.modality, deliverablesData);
   }, [modalityData?.deliverables, formData.modality, deliverablesData]);
 
-  // Auto-select all deliverables for non-WBT modalities
+  // Auto-select all deliverables by default but allow user to uncheck
   useEffect(() => {
-    if (!isEditing && formData.modality && formData.modality !== 'WBT' && availableDeliverables.length > 0 && formData.deliverables.length === 0) {
+    if (!isEditing && formData.modality && availableDeliverables.length > 0 && formData.deliverables.length === 0) {
       const allDeliverableIds = availableDeliverables.map(d => d.id);
       setFormData(prev => ({
         ...prev,
@@ -399,31 +385,11 @@ export default function CourseForm({ courseId = null }) {
                 </select>
               </div>
 
-              {/* Status - Only show when editing */}
-              {isEditing && (
-                <div>
-                  <label htmlFor="status" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Course Status
-                  </label>
-                  <select
-                    id="status"
-                    value={formData.status}
-                    onChange={(e) => handleInputChange('status', e.target.value)}
-                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  >
-                    {(statusesData?.data || statusesData || []).map(status => (
-                      <option key={status.value} value={status.value}>
-                        {status.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
 
-              {/* Owner Selection */}
+              {/* Lead Selection */}
               <div>
                 <label htmlFor="ownerId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Course Owner
+                  Course Lead
                 </label>
                 <select
                   id="ownerId"
@@ -431,7 +397,7 @@ export default function CourseForm({ courseId = null }) {
                   onChange={(e) => handleInputChange('ownerId', e.target.value)}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                 >
-                  <option value="">Select an owner...</option>
+                  <option value="">Select a lead...</option>
                   {(usersData || []).map(user => (
                     <option key={user.id} value={user.id}>
                       {user.name} ({user.email})
@@ -477,7 +443,7 @@ export default function CourseForm({ courseId = null }) {
                 Deliverables Selection
               </h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Choose the deliverables for your course:
+                Select the deliverables you want to include in your course:
               </p>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -527,7 +493,7 @@ export default function CourseForm({ courseId = null }) {
                 {/* Auto-Assigned Deliverables */}
                 <div>
                   <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-3">
-                    Deliverables (Auto-Assigned)
+                    Available Deliverables
                   </h3>
                   <div className="space-y-2">
                     {modalityInfo.deliverables.map(deliverable => (
@@ -562,7 +528,7 @@ export default function CourseForm({ courseId = null }) {
 
               <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  These deliverables and phases will be automatically created when you save the course. 
+                  Only your selected deliverables and the phases will be created when you save the course. 
                   Phases must be completed in order.
                 </p>
               </div>

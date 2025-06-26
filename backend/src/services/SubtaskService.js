@@ -176,13 +176,45 @@ class SubtaskService {
         
         // Special case: If changing to "No Status" (empty string), clear all dates immediately
         if (newStatus === '') {
-          console.log('DEBUG: Clearing dates because newStatus is empty string');
+          console.log('DEBUG: Clearing ALL dates because newStatus is empty string');
+          
+          // Clear basic dates
           updates.start_date = null;
           updates.finish_date = null;
           updates.completed_at = null;
           changes.start_date = { from: currentSubtask.start_date, to: null };
           changes.finish_date = { from: currentSubtask.finish_date, to: null };
           changes.completed_at = { from: currentSubtask.completed_at, to: null };
+          
+          // Clear all phase-specific dates
+          const phaseStatusToColumns = {
+            'alpha_draft': { start: 'alpha_draft_start_date', end: 'alpha_draft_end_date', completion: 'alpha_draft_date' },
+            'alpha_review': { start: 'alpha_review_start_date', end: 'alpha_review_end_date', completion: 'alpha_review_date' },
+            'beta_revision': { start: 'beta_revision_start_date', end: 'beta_revision_end_date', completion: 'beta_revision_date' },
+            'beta_review': { start: 'beta_review_start_date', end: 'beta_review_end_date', completion: 'beta_review_date' },
+            'final': { start: 'final_start_date', end: 'final_end_date', completion: 'final_date' },
+            'final_signoff_sent': { start: 'final_signoff_sent_start_date', end: 'final_signoff_sent_end_date', completion: 'final_signoff_sent_date' },
+            'final_signoff': { start: 'final_signoff_start_date', end: null, completion: 'final_signoff_date' }
+          };
+          
+          // Clear all phase dates
+          Object.values(phaseStatusToColumns).forEach(columns => {
+            // Clear start date
+            if (currentSubtask[columns.start]) {
+              updates[columns.start] = null;
+              changes[columns.start] = { from: currentSubtask[columns.start], to: null };
+            }
+            // Clear end date
+            if (currentSubtask[columns.end]) {
+              updates[columns.end] = null;
+              changes[columns.end] = { from: currentSubtask[columns.end], to: null };
+            }
+            // Clear completion date
+            if (currentSubtask[columns.completion]) {
+              updates[columns.completion] = null;
+              changes[columns.completion] = { from: currentSubtask[columns.completion], to: null };
+            }
+          });
         } else {
           // Set start_date when moving from 'pending' to any active status
           if (oldStatus === 'pending' && newStatus !== 'pending' && !currentSubtask.start_date) {
@@ -191,7 +223,7 @@ class SubtaskService {
           }
           
           // Set finish_date when moving to completion statuses
-          const completionStatuses = ['final', 'completed'];
+          const completionStatuses = ['final', 'final_signoff_sent', 'final_signoff', 'completed'];
           const wasNotCompleted = !completionStatuses.includes(oldStatus);
           const isNowCompleted = completionStatuses.includes(newStatus);
           
@@ -204,6 +236,71 @@ class SubtaskService {
           if (completionStatuses.includes(oldStatus) && !completionStatuses.includes(newStatus)) {
             updates.finish_date = null;
             changes.finish_date = { from: currentSubtask.finish_date, to: null };
+          }
+
+          // Set specific phase start and end dates
+          const phaseStatusToColumns = {
+            'alpha_draft': { start: 'alpha_draft_start_date', end: 'alpha_draft_end_date', completion: 'alpha_draft_date' },
+            'alpha_review': { start: 'alpha_review_start_date', end: 'alpha_review_end_date', completion: 'alpha_review_date' },
+            'beta_revision': { start: 'beta_revision_start_date', end: 'beta_revision_end_date', completion: 'beta_revision_date' },
+            'beta_review': { start: 'beta_review_start_date', end: 'beta_review_end_date', completion: 'beta_review_date' },
+            'final': { start: 'final_start_date', end: 'final_end_date', completion: 'final_date' },
+            'final_signoff_sent': { start: 'final_signoff_sent_start_date', end: 'final_signoff_sent_end_date', completion: 'final_signoff_sent_date' },
+            'final_signoff': { start: 'final_signoff_start_date', end: null, completion: 'final_signoff_date' }
+          };
+
+          // When moving TO a phase status, set the start date
+          if (phaseStatusToColumns[newStatus]) {
+            const columns = phaseStatusToColumns[newStatus];
+            if (!currentSubtask[columns.start]) {
+              updates[columns.start] = new Date();
+              changes[columns.start] = { from: null, to: updates[columns.start] };
+            }
+            // Also set the completion date for backwards compatibility
+            if (!currentSubtask[columns.completion]) {
+              updates[columns.completion] = new Date();
+              changes[columns.completion] = { from: null, to: updates[columns.completion] };
+            }
+          }
+
+          // When moving FROM a phase status, set the end date for the previous phase (if it has an end date)
+          if (oldStatus && phaseStatusToColumns[oldStatus] && oldStatus !== newStatus) {
+            const oldColumns = phaseStatusToColumns[oldStatus];
+            if (oldColumns.end && !currentSubtask[oldColumns.end]) {
+              updates[oldColumns.end] = new Date();
+              changes[oldColumns.end] = { from: null, to: updates[oldColumns.end] };
+            }
+          }
+
+          // Clear future phase dates when moving backward in the workflow
+          const phaseOrder = ['alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff'];
+          const currentPhaseIndex = phaseOrder.indexOf(newStatus);
+          const oldPhaseIndex = phaseOrder.indexOf(oldStatus);
+          
+          if (currentPhaseIndex >= 0 && currentPhaseIndex < oldPhaseIndex) {
+            // Moving backward - clear all future phase dates (start, end, and completion)
+            for (let i = currentPhaseIndex + 1; i < phaseOrder.length; i++) {
+              const futurePhase = phaseOrder[i];
+              const futureColumns = phaseStatusToColumns[futurePhase];
+              
+              if (futureColumns) {
+                // Clear start date
+                if (currentSubtask[futureColumns.start]) {
+                  updates[futureColumns.start] = null;
+                  changes[futureColumns.start] = { from: currentSubtask[futureColumns.start], to: null };
+                }
+                // Clear end date
+                if (currentSubtask[futureColumns.end]) {
+                  updates[futureColumns.end] = null;
+                  changes[futureColumns.end] = { from: currentSubtask[futureColumns.end], to: null };
+                }
+                // Clear completion date
+                if (currentSubtask[futureColumns.completion]) {
+                  updates[futureColumns.completion] = null;
+                  changes[futureColumns.completion] = { from: currentSubtask[futureColumns.completion], to: null };
+                }
+              }
+            }
           }
         }
         
@@ -706,6 +803,26 @@ class SubtaskService {
           cs.completed_at,
           cs.start_date,
           cs.finish_date,
+          cs.alpha_draft_date,
+          cs.alpha_review_date,
+          cs.beta_revision_date,
+          cs.beta_review_date,
+          cs.final_date,
+          cs.final_signoff_sent_date,
+          cs.final_signoff_date,
+          cs.alpha_draft_start_date,
+          cs.alpha_review_start_date,
+          cs.beta_revision_start_date,
+          cs.beta_review_start_date,
+          cs.final_start_date,
+          cs.final_signoff_sent_start_date,
+          cs.final_signoff_start_date,
+          cs.alpha_draft_end_date,
+          cs.alpha_review_end_date,
+          cs.beta_revision_end_date,
+          cs.beta_review_end_date,
+          cs.final_end_date,
+          cs.final_signoff_sent_end_date,
           cs.created_at,
           cs.updated_at
         FROM course_subtasks cs
@@ -726,6 +843,26 @@ class SubtaskService {
           completed_at: subtask.completed_at,
           start_date: subtask.start_date,
           finish_date: subtask.finish_date,
+          alpha_draft_date: subtask.alpha_draft_date,
+          alpha_review_date: subtask.alpha_review_date,
+          beta_revision_date: subtask.beta_revision_date,
+          beta_review_date: subtask.beta_review_date,
+          final_date: subtask.final_date,
+          final_signoff_sent_date: subtask.final_signoff_sent_date,
+          final_signoff_date: subtask.final_signoff_date,
+          alpha_draft_start_date: subtask.alpha_draft_start_date,
+          alpha_review_start_date: subtask.alpha_review_start_date,
+          beta_revision_start_date: subtask.beta_revision_start_date,
+          beta_review_start_date: subtask.beta_review_start_date,
+          final_start_date: subtask.final_start_date,
+          final_signoff_sent_start_date: subtask.final_signoff_sent_start_date,
+          final_signoff_start_date: subtask.final_signoff_start_date,
+          alpha_draft_end_date: subtask.alpha_draft_end_date,
+          alpha_review_end_date: subtask.alpha_review_end_date,
+          beta_revision_end_date: subtask.beta_revision_end_date,
+          beta_review_end_date: subtask.beta_review_end_date,
+          final_end_date: subtask.final_end_date,
+          final_signoff_sent_end_date: subtask.final_signoff_sent_end_date,
           created_at: subtask.created_at,
           updated_at: subtask.updated_at
         };

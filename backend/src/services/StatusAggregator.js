@@ -54,20 +54,14 @@ class StatusAggregator {
           COUNT(*) as total_subtasks,
           SUM(COALESCE(mt.weight_percentage, 100)) as total_weight_percentage,
           SUM(
-            CASE 
-              WHEN cs.status = 'final_signoff' THEN COALESCE(mt.weight_percentage, 100)
-              WHEN cs.status = 'final' THEN COALESCE(mt.weight_percentage, 100) * 0.95
-              WHEN cs.status = 'beta_review' THEN COALESCE(mt.weight_percentage, 100) * 0.7
-              WHEN cs.status = 'alpha_review' THEN COALESCE(mt.weight_percentage, 100) * 0.4
-              WHEN cs.status = 'completed' THEN COALESCE(mt.weight_percentage, 100)
-              ELSE 0 
-            END
+            COALESCE(mt.weight_percentage, 100) * COALESCE(ps.completion_percentage, 0) / 100.0
           ) as weighted_completion_points,
           COUNT(CASE WHEN cs.status = 'final_signoff' THEN 1 END) as final_signoff_count,
           COUNT(CASE WHEN cs.is_blocking = true AND cs.status NOT IN ('completed', 'final_signoff') THEN 1 END) as blocking_incomplete
         FROM course_subtasks cs
         LEFT JOIN courses c ON cs.course_id = c.id
         LEFT JOIN modality_tasks mt ON c.modality = mt.modality AND cs.task_type = mt.task_type
+        LEFT JOIN phase_statuses ps ON cs.status = ps.value
         WHERE cs.course_id = $1
       `, [courseId]);
 

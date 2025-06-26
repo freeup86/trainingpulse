@@ -443,4 +443,24 @@ export const phaseStatuses = {
     api.post('/phase-statuses/reorder', { statusIds }),
 };
 
+export const modalityTasks = {
+  getAll: () =>
+    api.get('/modality/tasks'),
+  
+  getByModality: (modality) =>
+    api.get(`/modality/tasks/${modality}`),
+  
+  create: (data) =>
+    api.post('/modality/tasks', data),
+  
+  update: (id, data) =>
+    api.put(`/modality/tasks/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/modality/tasks/${id}`),
+  
+  reorder: (modality, taskIds) =>
+    api.post('/modality/tasks/reorder', { modality, taskIds }),
+};
+
 export default api;

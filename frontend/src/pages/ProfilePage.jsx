@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { 
   User, 
   Edit,
@@ -40,6 +41,7 @@ function ProfilePage() {
   const [selectedTab, setSelectedTab] = useState('overview');
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Fetch user stats
   const { data: statsData, isLoading: statsLoading } = useQuery({
@@ -315,7 +317,7 @@ function ProfilePage() {
           <ProfileOverview profile={profile} isEditing={isEditing} onSave={updateProfile.mutate} />
         )}
         {selectedTab === 'assignments' && (
-          <ProfileAssignments assignments={assignments} />
+          <ProfileAssignments assignments={assignments} navigate={navigate} />
         )}
         {selectedTab === 'activity' && (
           <ProfileActivity activities={activities} />
@@ -476,7 +478,7 @@ function ProfileOverview({ profile, isEditing, onSave }) {
 }
 
 // Profile Assignments Component
-function ProfileAssignments({ assignments }) {
+function ProfileAssignments({ assignments, navigate }) {
   const queryClient = useQueryClient();
   
   const handleRefresh = () => {
@@ -552,7 +554,10 @@ function ProfileAssignments({ assignments }) {
                       )}
                     </div>
                   </div>
-                  <button className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium">
+                  <button 
+                    onClick={() => navigate(`/courses/${assignment.course.id}`)}
+                    className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium"
+                  >
                     View Details
                   </button>
                 </div>

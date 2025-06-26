@@ -148,7 +148,6 @@ function CoursesPage() {
     const saved = localStorage.getItem('coursesGroupBy');
     return saved || '';
   }); // '' for no grouping, 'status' for grouping by status
-  const [editingStatus, setEditingStatus] = useState(null); // courseId of course being edited
   const [filters, setFilters] = useState({
     priority: '',
     type: '',
@@ -247,7 +246,11 @@ function CoursesPage() {
     queryFn: async () => {
       const response = await phaseStatuses.getAll();
       return response.data.data;
-    }
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour - phase statuses change very rarely
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
   });
 
   const workflowTransitionMutation = useMutation({
@@ -275,56 +278,7 @@ function CoursesPage() {
     }
   });
 
-  // Mutation for updating course status
-  const updateCourseStatusMutation = useMutation({
-    mutationFn: ({ courseId, status }) => 
-      courses.update(courseId, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['courses']);
-      setEditingStatus(null);
-      toast.success('Course status updated successfully');
-    },
-    onError: (error) => {
-      console.error('Status update error:', error);
-      setEditingStatus(null);
-      
-      let errorMessage = 'Failed to update course status';
-      if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.response?.data?.error) {
-        errorMessage = error.response.data.error;
-      }
-      
-      toast.error(errorMessage);
-    }
-  });
 
-  const handleStatusUpdate = (courseId, newStatus) => {
-    updateCourseStatusMutation.mutate({ courseId, status: newStatus });
-  };
-
-  // Close status editing when clicking outside or pressing Escape
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setEditingStatus(null);
-      }
-    };
-
-    const handleClickOutside = (e) => {
-      if (editingStatus && !e.target.closest('.status-select-dropdown')) {
-        setEditingStatus(null);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('click', handleClickOutside);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('click', handleClickOutside);
-    };
-  }, [editingStatus]);
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({
@@ -720,7 +674,7 @@ function CoursesPage() {
                         Due Date
                       </th>
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Owner
+                        Lead
                       </th>
                       <th scope="col" className="relative px-6 py-3">
                         <span className="sr-only">Actions</span>
@@ -784,45 +738,10 @@ function CoursesPage() {
 
                             {/* Status Column */}
                             <td className="px-6 py-4 whitespace-nowrap">
-                              {editingStatus === course.id ? (
-                                <div className="relative status-select-dropdown">
-                                  <select
-                                    value={course.status || 'predevelopment'}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      handleStatusUpdate(course.id, e.target.value);
-                                    }}
-                                    onBlur={() => setEditingStatus(null)}
-                                    autoFocus
-                                    className="text-sm px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    disabled={updateCourseStatusMutation.isLoading}
-                                  >
-                                    {(statusesData?.data || statusesData || []).map((status) => (
-                                      <option key={status.value} value={status.value}>
-                                        {status.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  {updateCourseStatusMutation.isLoading && (
-                                    <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
-                                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div 
-                                  className="flex items-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 transition-colors"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingStatus(course.id);
-                                  }}
-                                  title="Click to change status"
-                                >
-                                  <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
-                                  <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
-                                  <Edit className="h-3 w-3 ml-1 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </div>
-                              )}
+                              <div className="flex items-center">
+                                <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
+                                <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
+                              </div>
                             </td>
 
                             {/* Progress Column */}
@@ -857,7 +776,7 @@ function CoursesPage() {
                               )}
                             </td>
 
-                            {/* Owner Column */}
+                            {/* Lead Column */}
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                               {course.owner ? (
                                 <div className="flex items-center">
@@ -934,7 +853,7 @@ function CoursesPage() {
                     Due Date
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Owner
+                    Lead
                   </th>
                   <th scope="col" className="relative px-6 py-3">
                     <span className="sr-only">Actions</span>
@@ -998,45 +917,10 @@ function CoursesPage() {
                         
                         {/* Status Column */}
                         <td className="px-6 py-4 whitespace-nowrap">
-                          {editingStatus === course.id ? (
-                            <div className="relative status-select-dropdown">
-                              <select
-                                value={course.status || 'predevelopment'}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  handleStatusUpdate(course.id, e.target.value);
-                                }}
-                                onBlur={() => setEditingStatus(null)}
-                                autoFocus
-                                className="text-sm px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                disabled={updateCourseStatusMutation.isLoading}
-                              >
-                                {(statusesData?.data || statusesData || []).map((status) => (
-                                  <option key={status.value} value={status.value}>
-                                    {status.label}
-                                  </option>
-                                ))}
-                              </select>
-                              {updateCourseStatusMutation.isLoading && (
-                                <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
-                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div 
-                              className="flex items-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingStatus(course.id);
-                              }}
-                              title="Click to change status"
-                            >
-                              <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
-                              <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
-                              <Edit className="h-3 w-3 ml-1 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </div>
-                          )}
+                          <div className="flex items-center">
+                            <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
+                            <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
+                          </div>
                         </td>
 
                         {/* Progress Column */}
@@ -1159,7 +1043,7 @@ function CoursesPage() {
                   </p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Owner</h3>
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Lead</h3>
                   <p className="mt-1 text-sm text-gray-900 dark:text-white">
                     {selectedCourse.owner ? selectedCourse.owner.name : 'Not assigned'}
                   </p>
@@ -1213,7 +1097,11 @@ function CourseProgress({ courseId, fallbackPercentage = 0 }) {
     queryFn: async () => {
       const response = await phaseStatuses.getAll();
       return response.data.data;
-    }
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours  
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
   });
   
   const course = courseData?.data?.data || courseData?.data || {};
@@ -1277,7 +1165,11 @@ function CoursePhases({ courseId }) {
     queryFn: async () => {
       const response = await phaseStatuses.getAll();
       return response.data.data; // Extract the actual array from {success: true, data: [...]}
-    }
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
   });
 
   // Fetch users for assignment
@@ -1452,7 +1344,36 @@ function CoursePhases({ courseId }) {
       return;
     }
 
-    // Don't close editing until the update is complete
+    const currentStatus = currentTask.status;
+    
+    // Check if changing from any status with dates to No Status
+    const statusesWithDates = [
+      'alpha_draft', 'alpha_review', 
+      'beta_revision', 'beta_review', 
+      'final', 'final_signoff_sent', 'final_signoff'
+    ];
+    const isChangingToNoStatus = newStatus === '';
+    const currentHasDates = statusesWithDates.includes(currentStatus);
+    
+    if (isChangingToNoStatus && currentHasDates) {
+      // Show confirmation dialog
+      const confirmed = window.confirm(
+        `Warning: Changing from "${currentStatus.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}" to "No Status" will clear ALL phase dates including:\n\n• All start dates (Alpha Draft, Alpha Review, Beta Revision, Beta Review, Final, Final Signoff Sent, Final Signoff Received)\n• All end dates (where applicable)\n• All completion dates\n• Basic task dates (start, finish, completed)\n\nThis action cannot be undone. Do you want to continue?`
+      );
+      
+      if (!confirmed) {
+        // Reset the temp status and editing state
+        setTempStatus(prev => {
+          const newStatus = { ...prev };
+          delete newStatus[subtaskId];
+          return newStatus;
+        });
+        setEditingTaskId(null);
+        return;
+      }
+    }
+
+    // Proceed with the update
     updateSubtaskMutation.mutate({
       subtaskId: subtaskId, // Use original ID (might be number)
       updateData: { 
@@ -1532,19 +1453,25 @@ function CoursePhases({ courseId }) {
   }
 
   const statusOptions = phaseStatusesData ? 
-    phaseStatusesData
-      .filter(status => status.isActive)
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map(status => ({
-        value: status.value,
-        label: status.label,
-        color: `${status.color} ${status.darkColor || ''}`
-      }))
+    [
+      // Add empty status option first
+      { value: '', label: 'No Status', color: 'text-gray-500 dark:text-gray-400' },
+      ...phaseStatusesData
+        .filter(status => status.isActive)
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map(status => ({
+          value: status.value,
+          label: status.label,
+          color: `${status.color} ${status.darkColor || ''}`
+        }))
+    ]
     : [
       // Fallback options
+      { value: '', label: 'No Status', color: 'text-gray-500 dark:text-gray-400' },
       { value: 'alpha_review', label: 'Alpha Review', color: 'text-blue-500 dark:text-blue-400' },
       { value: 'beta_review', label: 'Beta Review', color: 'text-orange-500 dark:text-orange-400' },
-      { value: 'final', label: 'Final (Gold)', color: 'text-yellow-600 dark:text-yellow-500' }
+      { value: 'final', label: 'Final (Gold)', color: 'text-yellow-600 dark:text-yellow-500' },
+      { value: 'final_signoff', label: 'Final Signoff Received', color: 'text-green-600 dark:text-green-400' }
     ];
 
   return (
@@ -1564,6 +1491,7 @@ function CoursePhases({ courseId }) {
             <div className="w-32 ml-4">Alpha Start/End</div>
             <div className="w-32 ml-4">Beta Start/End</div>
             <div className="w-32 ml-4">Final Start/End</div>
+            <div className="w-32 ml-4">Signoff Date</div>
           </div>
         </div>
         {subtasks.map((task, index) => {
@@ -1752,276 +1680,143 @@ function CoursePhases({ courseId }) {
                   )}
                 </div>
                 
-                {/* Alpha Review Start/End Column */}
+                {/* Alpha Start/End Column */}
                 <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
-                  {(() => {
-                    const alphaHistory = task.status_history?.find(h => h.status === 'alpha_review');
-                    if (alphaHistory) {
-                      const startDateKey = `alpha-start-${task.id}`;
-                      const endDateKey = `alpha-end-${task.id}`;
-                      return (
-                        <div className="space-y-1">
-                          {/* Start Date */}
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="h-3 w-3" />
-                            {editingDate === startDateKey ? (
-                              <div className="flex items-center space-x-1">
-                                <input
-                                  type="date"
-                                  value={tempDateValue}
-                                  onChange={(e) => setTempDateValue(e.target.value)}
-                                  className="text-xs px-1 py-0 border rounded w-20"
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={() => handleDateSave(task.id, alphaHistory.id, 'started_at')}
-                                  className="text-green-600 hover:text-green-800"
-                                  disabled={updatePhaseHistoryMutation.isPending}
-                                >
-                                  <CheckCircle className="h-3 w-3" />
-                                </button>
-                                <button
-                                  onClick={handleDateCancel}
-                                  className="text-gray-600 hover:text-gray-800"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <span
-                                className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-700 px-1 rounded"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  handleDateEdit(startDateKey, alphaHistory.started_at);
-                                }}
-                                title="Click to edit date"
-                              >
-                                {new Date(alphaHistory.started_at).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                          {/* End Date */}
-                          {alphaHistory.finished_at && (
-                            <div className="flex items-center space-x-1">
-                              <CheckCircle className="h-3 w-3" />
-                              {editingDate === endDateKey ? (
-                                  <div className="flex items-center space-x-1">
-                                    <input
-                                      type="date"
-                                      value={tempDateValue}
-                                      onChange={(e) => setTempDateValue(e.target.value)}
-                                      className="text-xs px-1 py-0 border rounded w-20"
-                                      autoFocus
-                                    />
-                                    <button
-                                      onClick={() => handleDateSave(task.id, alphaHistory.id, 'finished_at')}
-                                      className="text-green-600 hover:text-green-800"
-                                      disabled={updatePhaseHistoryMutation.isPending}
-                                    >
-                                      <CheckCircle className="h-3 w-3" />
-                                    </button>
-                                    <button
-                                      onClick={handleDateCancel}
-                                      className="text-gray-600 hover:text-gray-800"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span
-                                    className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-700 px-1 rounded"
-                                    onClick={() => handleDateEdit(endDateKey, alphaHistory.finished_at)}
-                                    title="Click to edit date"
-                                  >
-                                    {new Date(alphaHistory.finished_at).toLocaleDateString()}
-                                  </span>
-                                )}
-                              </div>
-                          )}
+                  <div className="space-y-1">
+                    {/* Alpha Draft */}
+                    {(task.alpha_draft_start_date || task.alpha_draft_end_date) && (
+                      <div className="text-xs text-blue-600 dark:text-blue-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Draft: {task.alpha_draft_start_date ? formatDate(task.alpha_draft_start_date) : '—'}</span>
                         </div>
-                      );
-                    }
-                    return <span className="text-gray-400">—</span>;
-                  })()}
+                        {task.alpha_draft_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.alpha_draft_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Alpha Review */}
+                    {(task.alpha_review_start_date || task.alpha_review_end_date) && (
+                      <div className="text-xs text-green-600 dark:text-green-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Review: {task.alpha_review_start_date ? formatDate(task.alpha_review_start_date) : '—'}</span>
+                        </div>
+                        {task.alpha_review_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.alpha_review_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show dash if no alpha dates */}
+                    {!task.alpha_draft_start_date && !task.alpha_draft_end_date && !task.alpha_review_start_date && !task.alpha_review_end_date && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
                 </div>
                 
-                {/* Beta Review Start/End Column */}
+                {/* Beta Start/End Column */}
                 <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
-                  {(() => {
-                    const betaHistory = task.status_history?.find(h => h.status === 'beta_review');
-                    if (betaHistory) {
-                      const startDateKey = `beta-start-${task.id}`;
-                      const endDateKey = `beta-end-${task.id}`;
-                      return (
-                        <div className="space-y-1">
-                          {/* Start Date */}
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="h-3 w-3" />
-                            {editingDate === startDateKey ? (
-                              <div className="flex items-center space-x-1">
-                                <input
-                                  type="date"
-                                  value={tempDateValue}
-                                  onChange={(e) => setTempDateValue(e.target.value)}
-                                  className="text-xs px-1 py-0 border rounded w-20"
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={() => handleDateSave(task.id, betaHistory.id, 'started_at')}
-                                  className="text-green-600 hover:text-green-800"
-                                  disabled={updatePhaseHistoryMutation.isPending}
-                                >
-                                  <CheckCircle className="h-3 w-3" />
-                                </button>
-                                <button
-                                  onClick={handleDateCancel}
-                                  className="text-gray-600 hover:text-gray-800"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <span
-                                className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-700 px-1 rounded"
-                                onClick={() => handleDateEdit(startDateKey, betaHistory.started_at)}
-                                title="Click to edit date"
-                              >
-                                {new Date(betaHistory.started_at).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                          {/* End Date */}
-                          {betaHistory.finished_at && (
-                            <div className="flex items-center space-x-1">
-                              <CheckCircle className="h-3 w-3" />
-                              {editingDate === endDateKey ? (
-                                  <div className="flex items-center space-x-1">
-                                    <input
-                                      type="date"
-                                      value={tempDateValue}
-                                      onChange={(e) => setTempDateValue(e.target.value)}
-                                      className="text-xs px-1 py-0 border rounded w-20"
-                                      autoFocus
-                                    />
-                                    <button
-                                      onClick={() => handleDateSave(task.id, betaHistory.id, 'finished_at')}
-                                      className="text-green-600 hover:text-green-800"
-                                      disabled={updatePhaseHistoryMutation.isPending}
-                                    >
-                                      <CheckCircle className="h-3 w-3" />
-                                    </button>
-                                    <button
-                                      onClick={handleDateCancel}
-                                      className="text-gray-600 hover:text-gray-800"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span
-                                    className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-700 px-1 rounded"
-                                    onClick={() => handleDateEdit(endDateKey, betaHistory.finished_at)}
-                                    title="Click to edit date"
-                                  >
-                                    {new Date(betaHistory.finished_at).toLocaleDateString()}
-                                  </span>
-                                )}
-                              </div>
-                          )}
+                  <div className="space-y-1">
+                    {/* Beta Revision */}
+                    {(task.beta_revision_start_date || task.beta_revision_end_date) && (
+                      <div className="text-xs text-orange-600 dark:text-orange-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Revision: {task.beta_revision_start_date ? formatDate(task.beta_revision_start_date) : '—'}</span>
                         </div>
-                      );
-                    }
-                    return <span className="text-gray-400">—</span>;
-                  })()}
+                        {task.beta_revision_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.beta_revision_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Beta Review */}
+                    {(task.beta_review_start_date || task.beta_review_end_date) && (
+                      <div className="text-xs text-purple-600 dark:text-purple-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Review: {task.beta_review_start_date ? formatDate(task.beta_review_start_date) : '—'}</span>
+                        </div>
+                        {task.beta_review_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.beta_review_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show dash if no beta dates */}
+                    {!task.beta_revision_start_date && !task.beta_revision_end_date && !task.beta_review_start_date && !task.beta_review_end_date && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
                 </div>
                 
                 {/* Final Start/End Column */}
                 <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
-                  {(() => {
-                    const finalHistory = task.status_history?.find(h => h.status === 'final');
-                    if (finalHistory) {
-                      const startDateKey = `final-start-${task.id}`;
-                      const endDateKey = `final-end-${task.id}`;
-                      return (
-                        <div className="space-y-1">
-                          {/* Start Date */}
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="h-3 w-3" />
-                            {editingDate === startDateKey ? (
-                              <div className="flex items-center space-x-1">
-                                <input
-                                  type="date"
-                                  value={tempDateValue}
-                                  onChange={(e) => setTempDateValue(e.target.value)}
-                                  className="text-xs px-1 py-0 border rounded w-20"
-                                  autoFocus
-                                />
-                                <button
-                                  onClick={() => handleDateSave(task.id, finalHistory.id, 'started_at')}
-                                  className="text-green-600 hover:text-green-800"
-                                  disabled={updatePhaseHistoryMutation.isPending}
-                                >
-                                  <CheckCircle className="h-3 w-3" />
-                                </button>
-                                <button
-                                  onClick={handleDateCancel}
-                                  className="text-gray-600 hover:text-gray-800"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <span
-                                className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-700 px-1 rounded"
-                                onClick={() => handleDateEdit(startDateKey, finalHistory.started_at)}
-                                title="Click to edit date"
-                              >
-                                {new Date(finalHistory.started_at).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                          {/* End Date */}
+                  <div className="space-y-1">
+                    {/* Final Revision */}
+                    {(task.final_start_date || task.final_end_date) && (
+                      <div className="text-xs text-yellow-600 dark:text-yellow-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Final: {task.final_start_date ? formatDate(task.final_start_date) : '—'}</span>
+                        </div>
+                        {task.final_end_date && (
                           <div className="flex items-center space-x-1">
                             <CheckCircle className="h-3 w-3" />
-                            {editingDate === endDateKey ? (
-                                <div className="flex items-center space-x-1">
-                                  <input
-                                    type="date"
-                                    value={tempDateValue}
-                                    onChange={(e) => setTempDateValue(e.target.value)}
-                                    className="text-xs px-1 py-0 border rounded w-20"
-                                    autoFocus
-                                  />
-                                  <button
-                                    onClick={() => handleDateSave(task.id, finalHistory.id, 'finished_at')}
-                                    className="text-green-600 hover:text-green-800"
-                                    disabled={updatePhaseHistoryMutation.isPending}
-                                  >
-                                    <CheckCircle className="h-3 w-3" />
-                                  </button>
-                                  <button
-                                    onClick={handleDateCancel}
-                                    className="text-gray-600 hover:text-gray-800"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span
-                                  className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-700 px-1 rounded"
-                                  onClick={() => handleDateEdit(endDateKey, finalHistory.finished_at)}
-                                  title="Click to edit date"
-                                >
-                                  {finalHistory.finished_at ? new Date(finalHistory.finished_at).toLocaleDateString() : 'Add end date'}
-                                </span>
-                              )}
-                            </div>
+                            <span>End: {formatDate(task.final_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show dash if no final dates */}
+                    {!task.final_start_date && !task.final_end_date && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Signoff Dates Column */}
+                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
+                  <div className="space-y-1">
+                    {/* Final Signoff Sent */}
+                    {(task.final_signoff_sent_start_date || task.final_signoff_sent_end_date) && (
+                      <div className="text-xs text-blue-600 dark:text-blue-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Sent: {task.final_signoff_sent_start_date ? formatDate(task.final_signoff_sent_start_date) : '—'}</span>
                         </div>
-                      );
-                    }
-                    return <span className="text-gray-400">—</span>;
-                  })()}
+                        {task.final_signoff_sent_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.final_signoff_sent_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Final Signoff Received */}
+                    {task.final_signoff_start_date && (
+                      <div className="text-xs text-green-600 dark:text-green-400">
+                        <div className="flex items-center space-x-1">
+                          <CheckCircle className="h-3 w-3" />
+                          <span>Received: {formatDate(task.final_signoff_start_date)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Show dash if no signoff dates */}
+                    {!task.final_signoff_sent_start_date && !task.final_signoff_sent_end_date && !task.final_signoff_start_date && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

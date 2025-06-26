@@ -85,10 +85,10 @@ if (process.env.ENABLE_REQUEST_LOGGING === 'true') {
   app.use(requestLogger);
 }
 
-// Rate limiting
+// Rate limiting - more lenient for development
 const publicLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (process.env.NODE_ENV === 'development' ? 10000 : 100), // Very high for dev
   message: {
     success: false,
     error: {
@@ -102,7 +102,7 @@ const publicLimiter = rateLimit({
 
 const authenticatedLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000, // 1 minute
-  max: parseInt(process.env.AUTHENTICATED_RATE_LIMIT_MAX_REQUESTS) || 500, // Much higher limit for authenticated users
+  max: parseInt(process.env.AUTHENTICATED_RATE_LIMIT_MAX_REQUESTS) || (process.env.NODE_ENV === 'development' ? 10000 : 500),
   message: {
     success: false,
     error: {
@@ -116,7 +116,7 @@ const authenticatedLimiter = rateLimit({
 
 const bulkLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
-  max: parseInt(process.env.BULK_RATE_LIMIT_MAX_REQUESTS) || 10,
+  max: parseInt(process.env.BULK_RATE_LIMIT_MAX_REQUESTS) || (process.env.NODE_ENV === 'development' ? 1000 : 10),
   message: {
     success: false,
     error: {
@@ -126,8 +126,24 @@ const bulkLimiter = rateLimit({
   }
 });
 
-// Apply public rate limiter to all routes initially
-app.use(publicLimiter);
+const statusLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
+  max: parseInt(process.env.STATUS_RATE_LIMIT_MAX_REQUESTS) || (process.env.NODE_ENV === 'development' ? 10000 : 1000),
+  message: {
+    success: false,
+    error: {
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Too many status requests from this IP'
+    }
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply public rate limiter to all routes initially (but lenient in development)
+if (process.env.NODE_ENV !== 'development') {
+  app.use(publicLimiter);
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -153,8 +169,8 @@ app.use(`/api/${API_VERSION}/analytics`, authenticate, authenticatedLimiter, ana
 app.use(`/api/${API_VERSION}/bulk`, authenticate, bulkLimiter, bulkRoutes);
 app.use(`/api/${API_VERSION}/notifications`, authenticate, authenticatedLimiter, notificationRoutes);
 app.use(`/api/${API_VERSION}/settings`, authenticate, authenticatedLimiter, settingsRoutes);
-app.use(`/api/${API_VERSION}/statuses`, authenticate, authenticatedLimiter, statusRoutes);
-app.use(`/api/${API_VERSION}/phase-statuses`, authenticate, authenticatedLimiter, phaseStatusRoutes);
+app.use(`/api/${API_VERSION}/statuses`, authenticate, statusLimiter, statusRoutes);
+app.use(`/api/${API_VERSION}/phase-statuses`, authenticate, statusLimiter, phaseStatusRoutes);
 app.use(`/api/${API_VERSION}/roles`, authenticate, authenticatedLimiter, roleRoutes);
 app.use(`/api/${API_VERSION}/permissions`, authenticate, authenticatedLimiter, permissionRoutes);
 app.use(`/api/${API_VERSION}/user-permissions`, authenticate, authenticatedLimiter, userPermissionRoutes);

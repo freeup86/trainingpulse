@@ -6,7 +6,6 @@ import { useAuth } from '../hooks/useAuth';
 import { 
   ArrowLeft,
   Edit3,
-  Edit,
   Calendar,
   Clock,
   Users,
@@ -19,16 +18,14 @@ import {
   ListTodo,
   PlayCircle,
   Trash2,
-  Plus,
   X,
   Package
 } from 'lucide-react';
-import { courses, statuses, phaseStatuses, users } from '../lib/api';
+import { courses, statuses, phaseStatuses } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import TaskManager from '../components/TaskManager';
 import WorkflowMapModal from '../components/WorkflowMapModal';
 
 // Independent status definitions (separate from workflow)
@@ -105,17 +102,7 @@ export default function CourseDetailPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [isEditingTasks, setIsEditingTasks] = useState(false);
   const [showWorkflowMap, setShowWorkflowMap] = useState(false);
-  const [editingPhaseId, setEditingPhaseId] = useState(null);
-  const [tempPhaseStatus, setTempPhaseStatus] = useState({});
-  const [isEditingCourseStatus, setIsEditingCourseStatus] = useState(false);
-  const [editingAssignmentId, setEditingAssignmentId] = useState(null);
-  const [tempAssignment, setTempAssignment] = useState({});
-  const [isEditingPriority, setIsEditingPriority] = useState(false);
-  const [tempPriority, setTempPriority] = useState('');
-  const [isEditingOwner, setIsEditingOwner] = useState(false);
-  const [tempOwnerId, setTempOwnerId] = useState('');
 
   const { data: courseData, isLoading, error } = useQuery({
     queryKey: ['course', id],
@@ -138,17 +125,13 @@ export default function CourseDetailPage() {
     queryFn: async () => {
       const response = await phaseStatuses.getAll();
       return response.data.data; // Extract the actual array from {success: true, data: [...]}
-    }
+    },
+    staleTime: 10 * 60 * 1000, // 10 minutes
+    cacheTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
   });
 
-  // Fetch users for assignment
-  const { data: usersData } = useQuery({
-    queryKey: ['users'],
-    queryFn: async () => {
-      const response = await users.getAll();
-      return response.data.data.users; // Extract users array
-    }
-  });
 
   // Delete course mutation
   const deleteMutation = useMutation({
@@ -190,63 +173,8 @@ export default function CourseDetailPage() {
     }
   });
 
-  // Update subtask mutation for phase status changes
-  const updateSubtaskMutation = useMutation({
-    mutationFn: ({ subtaskId, updateData }) => {
-      return courses.updateSubtask(id, subtaskId, updateData);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['course', id]);
-      queryClient.invalidateQueries(['courses']);
-      toast.success('Phase updated successfully');
-      setEditingPhaseId(null);
-      setTempPhaseStatus({});
-      setEditingAssignmentId(null);
-      setTempAssignment({});
-    },
-    onError: (error) => {
-      console.error('Subtask update error:', error);
-      toast.error(error.response?.data?.error?.message || 'Failed to update phase');
-      setEditingPhaseId(null);
-      setTempPhaseStatus({});
-      setEditingAssignmentId(null);
-      setTempAssignment({});
-    }
-  });
 
-  // Update course status mutation
-  const updateCourseStatusMutation = useMutation({
-    mutationFn: (newStatus) => courses.update(id, { status: newStatus }),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['course', id]);
-      queryClient.invalidateQueries(['courses']);
-      toast.success('Course status updated successfully');
-      setIsEditingCourseStatus(false);
-    },
-    onError: (error) => {
-      console.error('Course status update error:', error);
-      toast.error(error.response?.data?.error?.message || 'Failed to update course status');
-      setIsEditingCourseStatus(false);
-    }
-  });
 
-  // Update course details mutation (for priority and owner)
-  const updateCourseDetailsMutation = useMutation({
-    mutationFn: (updateData) => courses.update(id, updateData),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['course', id]);
-      queryClient.invalidateQueries(['courses']);
-      toast.success('Course updated successfully');
-      setIsEditingPriority(false);
-      setIsEditingOwner(false);
-    },
-    onError: (error) => {
-      console.error('Course update error:', error);
-      toast.error(error.response?.data?.error?.message || 'Failed to update course');
-      setIsEditingPriority(false);
-      setIsEditingOwner(false);
-    }
-  });
 
   const handleDeleteClick = () => {
     setShowDeleteDialog(true);
@@ -269,116 +197,8 @@ export default function CourseDetailPage() {
     });
   };
 
-  const handleCourseStatusUpdate = (newStatus) => {
-    updateCourseStatusMutation.mutate(newStatus);
-  };
 
-  const handleStatusUpdate = (subtaskId, newStatus) => {
-    // Find the subtask to get all its current data
-    const subtask = course.subtasks?.find(s => s.id === subtaskId);
-    if (!subtask) {
-      toast.error('Subtask not found');
-      return;
-    }
-    
-    updateSubtaskMutation.mutate({
-      subtaskId,
-      updateData: { 
-        title: subtask.title,
-        status: newStatus,
-        isBlocking: subtask.is_blocking || subtask.isBlocking || false,
-        weight: subtask.weight || 1,
-        orderIndex: subtask.order_index || subtask.orderIndex || 0
-      }
-    });
-  };
 
-  const handleStatusClick = (subtaskId, currentStatus) => {
-    setEditingPhaseId(subtaskId);
-    setTempPhaseStatus({ [subtaskId]: currentStatus });
-  };
-
-  const handleStatusChange = (subtaskId, newStatus) => {
-    setTempPhaseStatus({ [subtaskId]: newStatus });
-  };
-
-  const handleStatusConfirm = (subtaskId) => {
-    const newStatus = tempPhaseStatus[subtaskId];
-    if (newStatus) {
-      handleStatusUpdate(subtaskId, newStatus);
-    }
-  };
-
-  const handleStatusCancel = () => {
-    setEditingPhaseId(null);
-    setTempPhaseStatus({});
-  };
-
-  // Assignment handling functions
-  const handleAssignmentClick = (subtaskId, currentAssignedUserIds) => {
-    setEditingAssignmentId(subtaskId);
-    setTempAssignment({ [subtaskId]: currentAssignedUserIds || [] });
-  };
-
-  const handleAssignmentToggle = (subtaskId, userId) => {
-    const currentAssignments = tempAssignment[subtaskId] || [];
-    const isAssigned = currentAssignments.includes(userId);
-    
-    let newAssignments;
-    if (isAssigned) {
-      newAssignments = currentAssignments.filter(id => id !== userId);
-    } else {
-      newAssignments = [...currentAssignments, userId];
-    }
-    
-    setTempAssignment({ [subtaskId]: newAssignments });
-  };
-
-  const handleAssignmentConfirm = (subtaskId) => {
-    const newAssignedUserIds = tempAssignment[subtaskId] || [];
-    
-    updateSubtaskMutation.mutate({
-      subtaskId,
-      updateData: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
-    });
-    setEditingAssignmentId(null);
-    setTempAssignment({});
-  };
-
-  const handleAssignmentCancel = () => {
-    setEditingAssignmentId(null);
-    setTempAssignment({});
-  };
-
-  // Priority editing handlers
-  const handlePriorityClick = () => {
-    setTempPriority(course.priority || 'medium');
-    setIsEditingPriority(true);
-  };
-
-  const handlePriorityConfirm = () => {
-    updateCourseDetailsMutation.mutate({ priority: tempPriority });
-  };
-
-  const handlePriorityCancel = () => {
-    setIsEditingPriority(false);
-    setTempPriority('');
-  };
-
-  // Owner editing handlers
-  const handleOwnerClick = () => {
-    setTempOwnerId(course.owner?.id || course.ownerId || '');
-    setIsEditingOwner(true);
-  };
-
-  const handleOwnerConfirm = () => {
-    updateCourseDetailsMutation.mutate({ ownerId: tempOwnerId || null });
-  };
-
-  const handleOwnerCancel = () => {
-    setIsEditingOwner(false);
-    setTempOwnerId('');
-  };
 
   if (isLoading) {
     return (
@@ -499,87 +319,19 @@ export default function CourseDetailPage() {
                   
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Priority</h4>
-                    {isEditingPriority ? (
-                      <div className="flex items-center space-x-2">
-                        <select
-                          value={tempPriority}
-                          onChange={(e) => setTempPriority(e.target.value)}
-                          className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                        >
-                          <option value="low">Low</option>
-                          <option value="medium">Medium</option>
-                          <option value="high">High</option>
-                          <option value="critical">Critical</option>
-                        </select>
-                        <button
-                          onClick={handlePriorityConfirm}
-                          disabled={updateCourseDetailsMutation.isPending}
-                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
-                        >
-                          <CheckCircle className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={handlePriorityCancel}
-                          disabled={updateCourseDetailsMutation.isPending}
-                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={handlePriorityClick}
-                        className="hover:opacity-80 transition-opacity"
-                      >
-                        <Badge className={`border-2 border-dashed border-gray-300 dark:border-gray-600 ${getPriorityColor(course.priority)}`}>
-                          {course.priority}
-                        </Badge>
-                      </button>
-                    )}
+                    <Badge className={getPriorityColor(course.priority)}>
+                      {course.priority || 'medium'}
+                    </Badge>
                   </div>
 
                   <div>
-                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Owner</h4>
-                    {isEditingOwner ? (
-                      <div className="flex items-center space-x-2">
-                        <select
-                          value={tempOwnerId}
-                          onChange={(e) => setTempOwnerId(e.target.value)}
-                          className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                        >
-                          <option value="">No owner</option>
-                          {(usersData || []).map(user => (
-                            <option key={user.id} value={user.id}>
-                              {user.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          onClick={handleOwnerConfirm}
-                          disabled={updateCourseDetailsMutation.isPending}
-                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
-                        >
-                          <CheckCircle className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={handleOwnerCancel}
-                          disabled={updateCourseDetailsMutation.isPending}
-                          className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={handleOwnerClick}
-                        className="flex items-center space-x-2 hover:opacity-80 transition-opacity text-left px-2 py-1 rounded border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-                      >
-                        <Users className="h-4 w-4 text-gray-400" />
-                        <span className="text-gray-700 dark:text-gray-300">
-                          {course.owner ? course.owner.name : 'Not assigned'}
-                        </span>
-                      </button>
-                    )}
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Lead</h4>
+                    <div className="flex items-center space-x-2 px-2 py-1 rounded bg-gray-50 dark:bg-gray-800">
+                      <Users className="h-4 w-4 text-gray-400" />
+                      <span className="text-gray-700 dark:text-gray-300">
+                        {course.owner ? course.owner.name : 'Not assigned'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -598,7 +350,7 @@ export default function CourseDetailPage() {
             <Card>
               <CardHeader>
                 <div className="flex items-center space-x-2">
-                  <Package className="h-5 w-5" />
+                  <Package className="h-5 w-5 text-gray-600 dark:text-gray-300" />
                   <CardTitle>Course Deliverables</CardTitle>
                 </div>
                 <CardDescription>
@@ -668,35 +420,16 @@ export default function CourseDetailPage() {
           {/* Tasks Section */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <ListTodo className="h-5 w-5" />
-                  <CardTitle>Phases of Development</CardTitle>
-                </div>
-                <Button
-                  onClick={() => setIsEditingTasks(!isEditingTasks)}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center space-x-2"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>{isEditingTasks ? 'Done' : 'Manage Phases'}</span>
-                </Button>
+              <div className="flex items-center space-x-2">
+                <ListTodo className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Phases of Development</CardTitle>
               </div>
               <CardDescription>
-                Track progress on individual development phases
+                Current development phases and their status
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {isEditingTasks ? (
-                <TaskManager 
-                  courseId={id} 
-                  initialTasks={course.subtasks || []} 
-                  showTitle={false}
-                />
-              ) : (
-                <>
-                  {course.subtasks && course.subtasks.length > 0 ? (
+              {course.subtasks && course.subtasks.length > 0 ? (
                     <>
                       <div className="space-y-3">
                         {course.subtasks
@@ -814,109 +547,64 @@ export default function CourseDetailPage() {
                                         );
                                       })()}
                                       <div className="flex items-center space-x-4 mt-1">
-                                        {editingPhaseId === subtask.id ? (
-                                          <div className="flex items-center space-x-2">
-                                            <select
-                                              value={tempPhaseStatus[subtask.id] || subtask.status}
-                                              onChange={(e) => handleStatusChange(subtask.id, e.target.value)}
-                                              className="text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                                            >
-                                              {phaseStatusesData ? 
-                                                phaseStatusesData
-                                                  .filter(status => status.isActive)
-                                                  .sort((a, b) => a.sortOrder - b.sortOrder)
-                                                  .map(status => (
-                                                    <option key={status.value} value={status.value}>
-                                                      {status.label}
-                                                    </option>
-                                                  ))
-                                                :
-                                                // Fallback options
-                                                <>
-                                                  <option value="alpha_review">Alpha Review</option>
-                                                  <option value="beta_review">Beta Review</option>
-                                                  <option value="final">Final (Gold)</option>
-                                                </>
-                                              }
-                                            </select>
-                                            <button
-                                              onClick={() => handleStatusConfirm(subtask.id)}
-                                              disabled={updateSubtaskMutation.isPending}
-                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
-                                            >
-                                              <CheckCircle className="h-3 w-3" />
-                                            </button>
-                                            <button
-                                              onClick={handleStatusCancel}
-                                              disabled={updateSubtaskMutation.isPending}
-                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
-                                            >
-                                              <X className="h-3 w-3" />
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <button
-                                            onClick={() => handleStatusClick(subtask.id, subtask.status)}
-                                            className={`text-xs px-2.5 py-0.5 rounded font-medium hover:opacity-80 transition-opacity border-2 border-dashed border-gray-300 dark:border-gray-600 ${getStatusColor(subtask.status)}`}
-                                          >
-                                            {(() => {
-                                              const foundStatus = phaseStatusesData?.find(s => s.value === subtask.status);
-                                              
-                                              return foundStatus?.label || 
-                                                     (subtask.status === 'final' ? 'Final (Gold)' : subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()));
-                                            })()}
-                                          </button>
-                                        )}
-                                        {/* Assignment Section */}
-                                        {editingAssignmentId === subtask.id ? (
-                                          <div className="flex items-center space-x-2">
-                                            <div className="relative">
-                                              <div className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-2 max-h-32 overflow-y-auto min-w-48">
-                                                {(usersData || []).map(user => {
-                                                  const isSelected = (tempAssignment[subtask.id] || []).includes(user.id);
-                                                  return (
-                                                    <label key={user.id} className="flex items-center space-x-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-600 p-1 rounded cursor-pointer">
-                                                      <input
-                                                        type="checkbox"
-                                                        checked={isSelected}
-                                                        onChange={() => handleAssignmentToggle(subtask.id, user.id)}
-                                                        className="h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                                      />
-                                                      <span className="text-gray-900 dark:text-white">{user.name}</span>
-                                                    </label>
-                                                  );
-                                                })}
+                                        {/* Read-only status display */}
+                                        <div className={`text-xs px-2.5 py-0.5 rounded font-medium ${getStatusColor(subtask.status)}`}>
+                                          {(() => {
+                                            const foundStatus = phaseStatusesData?.find(s => s.value === subtask.status);
+                                            
+                                            return foundStatus?.label || 
+                                                   (subtask.status === 'final' ? 'Final (Gold)' : 
+                                                    subtask.status === '' ? 'No Status' : 
+                                                    subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()));
+                                          })()}
+                                        </div>
+                                        {/* Read-only assignment display */}
+                                        <div className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+                                          <Users className="h-3 w-3 inline mr-1" />
+                                          {subtask.assignedUsers && subtask.assignedUsers.length > 0 
+                                            ? subtask.assignedUsers.length === 1 
+                                              ? subtask.assignedUsers[0].name 
+                                              : `${subtask.assignedUsers.length} users`
+                                            : 'Not assigned'}
+                                        </div>
+                                        
+                                        {/* Phase Dates Display */}
+                                        {(() => {
+                                          const phaseData = [
+                                            { label: 'Alpha Draft', start: subtask.alpha_draft_start_date, end: subtask.alpha_draft_end_date },
+                                            { label: 'Alpha Review', start: subtask.alpha_review_start_date, end: subtask.alpha_review_end_date },
+                                            { label: 'Beta Revision', start: subtask.beta_revision_start_date, end: subtask.beta_revision_end_date },
+                                            { label: 'Beta Review', start: subtask.beta_review_start_date, end: subtask.beta_review_end_date },
+                                            { label: 'Final Revision', start: subtask.final_start_date, end: subtask.final_end_date },
+                                            { label: 'Final Signoff Sent', start: subtask.final_signoff_sent_start_date, end: subtask.final_signoff_sent_end_date },
+                                            { label: 'Final Signoff Received', start: subtask.final_signoff_start_date, end: null }
+                                          ].filter(phase => phase.start || phase.end);
+
+                                          return phaseData.length > 0 && (
+                                            <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                              <h4 className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Phase Timeline</h4>
+                                              <div className="space-y-1">
+                                                {phaseData.map((phase, idx) => (
+                                                  <div key={idx} className="flex justify-between items-center text-xs text-gray-600 dark:text-gray-400">
+                                                    <span className="font-medium">{phase.label}:</span>
+                                                    <div className="flex space-x-2">
+                                                      {phase.start && (
+                                                        <span className="text-green-600 dark:text-green-400">
+                                                          Started: {formatDate(phase.start)}
+                                                        </span>
+                                                      )}
+                                                      {phase.end && (
+                                                        <span className="text-blue-600 dark:text-blue-400">
+                                                          Ended: {formatDate(phase.end)}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                ))}
                                               </div>
                                             </div>
-                                            <button
-                                              onClick={() => handleAssignmentConfirm(subtask.id)}
-                                              disabled={updateSubtaskMutation.isPending}
-                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50"
-                                            >
-                                              <CheckCircle className="h-3 w-3" />
-                                            </button>
-                                            <button
-                                              onClick={handleAssignmentCancel}
-                                              disabled={updateSubtaskMutation.isPending}
-                                              className="inline-flex items-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50"
-                                            >
-                                              <X className="h-3 w-3" />
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <button
-                                            onClick={() => handleAssignmentClick(subtask.id, (subtask.assignedUsers || []).map(u => u.id))}
-                                            className="text-xs px-2.5 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
-                                            title={subtask.assignedUsers && subtask.assignedUsers.length > 0 ? `Assigned to ${subtask.assignedUsers.map(u => u.name).join(', ')}` : 'Click to assign'}
-                                          >
-                                            <Users className="h-3 w-3 inline mr-1" />
-                                            {subtask.assignedUsers && subtask.assignedUsers.length > 0 
-                                              ? subtask.assignedUsers.length === 1 
-                                                ? subtask.assignedUsers[0].name 
-                                                : `${subtask.assignedUsers.length} users`
-                                              : 'Assign'}
-                                          </button>
-                                        )}
+                                          );
+                                        })()}
                                       </div>
                                     </div>
                                   </div>
@@ -931,19 +619,9 @@ export default function CourseDetailPage() {
                     <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
                       <ListTodo className="h-8 w-8 mx-auto text-gray-400 mb-2" />
                       <p className="text-gray-500 dark:text-gray-400 mb-4">No phases yet</p>
-                      <Button
-                        onClick={() => setIsEditingTasks(true)}
-                        variant="outline"
-                        size="sm"
-                        className="flex items-center space-x-2"
-                      >
-                        <Plus className="h-4 w-4" />
-                        <span>Add First Task</span>
-                      </Button>
+                      <p className="text-xs text-gray-400">No phases have been added to this course</p>
                     </div>
                   )}
-                </>
-              )}
             </CardContent>
           </Card>
         </div>
@@ -961,44 +639,9 @@ export default function CourseDetailPage() {
                   <StatusIcon className={`h-4 w-4 ${statusInfo.color}`} />
                   <span className="text-sm font-medium text-gray-900 dark:text-white">Status</span>
                 </div>
-                {isEditingCourseStatus ? (
-                  <div className="flex items-center space-x-2">
-                    <select
-                      value={courseStatus}
-                      onChange={(e) => handleCourseStatusUpdate(e.target.value)}
-                      className="text-sm px-2 py-1 border border-blue-500 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      disabled={updateCourseStatusMutation.isPending}
-                      autoFocus
-                    >
-                      {(statusesData?.data || statusesData || []).map((status) => (
-                        <option key={status.value} value={status.value}>
-                          {status.label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => setIsEditingCourseStatus(false)}
-                      className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                      disabled={updateCourseStatusMutation.isPending}
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                    {updateCourseStatusMutation.isPending && (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    )}
-                  </div>
-                ) : (
-                  <div 
-                    className="flex items-center space-x-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 transition-colors group"
-                    onClick={() => setIsEditingCourseStatus(true)}
-                    title="Click to change status"
-                  >
-                    <Badge className={`border-2 border-dashed border-gray-300 dark:border-gray-600 ${statusInfo.color}`}>
-                      {statusInfo.label}
-                    </Badge>
-                    <Edit className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                )}
+                <Badge className={statusInfo.color}>
+                  {statusInfo.label}
+                </Badge>
               </div>
 
             </CardContent>
@@ -1010,15 +653,25 @@ export default function CourseDetailPage() {
               <CardTitle>Important Dates</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {(course.dueDate || course.due_date) && (
-                <div className="flex items-center space-x-2">
-                  <Calendar className="h-4 w-4 text-gray-500" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">Due Date</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{formatDate(course.dueDate || course.due_date)}</p>
-                  </div>
+              <div className="flex items-center space-x-2">
+                <Calendar className="h-4 w-4 text-blue-500" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Start Date</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {(course.startDate || course.start_date) ? formatDate(course.startDate || course.start_date) : 'Not set'}
+                  </p>
                 </div>
-              )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Calendar className="h-4 w-4 text-red-500" />
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">Due Date</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {(course.dueDate || course.due_date) ? formatDate(course.dueDate || course.due_date) : 'Not set'}
+                  </p>
+                </div>
+              </div>
 
               <div className="flex items-center space-x-2">
                 <Clock className="h-4 w-4 text-gray-500" />

@@ -52,7 +52,7 @@ const updateCourseSchema = Joi.object({
 });
 
 // Dynamic subtask schema that will be updated with valid phase statuses
-const createSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
+const createSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff']) => {
   return Joi.object({
     title: Joi.string().min(1).max(255).required().trim(),
     status: Joi.string().valid(...validStatuses).default(''),
@@ -64,7 +64,7 @@ const createSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'com
   });
 };
 
-const updateSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final']) => {
+const updateSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff']) => {
   return Joi.object({
     title: Joi.string().min(1).max(255).optional().trim(),
     status: Joi.string().valid(...validStatuses).optional(),
@@ -99,7 +99,7 @@ class CourseController {
     } catch (error) {
       console.error('DEBUG: Error loading phase statuses from DB:', error.message);
       // Fallback to hardcoded statuses if phase_statuses table doesn't exist
-      const fallbackStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_review', 'beta_review', 'final', 'final_signoff'];
+      const fallbackStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff'];
       console.log('DEBUG: Using fallback statuses:', fallbackStatuses);
       return fallbackStatuses;
     }

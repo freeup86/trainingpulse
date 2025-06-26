@@ -24,7 +24,11 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     queryFn: async () => {
       const response = await phaseStatuses.getAll();
       return response.data.data; // Extract the actual array from {success: true, data: [...]}
-    }
+    },
+    staleTime: 10 * 60 * 1000, // 10 minutes
+    cacheTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
   });
 
   // Convert database statuses to the format expected by the component
@@ -40,7 +44,8 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     // Fallback to hardcoded statuses if database is unavailable
     { value: 'alpha_review', label: 'Alpha Review', icon: PlayCircle, color: 'text-blue-500' },
     { value: 'beta_review', label: 'Beta Review', icon: PlayCircle, color: 'text-orange-500' },
-    { value: 'final', label: 'Final (Gold)', icon: PlayCircle, color: 'text-yellow-600' }
+    { value: 'final', label: 'Final (Gold)', icon: PlayCircle, color: 'text-yellow-600' },
+    { value: 'final_signoff', label: 'Final Signoff Received', icon: PlayCircle, color: 'text-green-600' }
   ];
   const [tasks, setTasks] = useState(
     (initialTasks || []).map(task => ({
@@ -138,6 +143,29 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
 
   const updateTask = (index, field, value) => {
     const updatedTasks = [...tasks];
+    const currentTask = updatedTasks[index];
+    
+    // Check for warning when changing status to "No Status"
+    if (field === 'status' && courseId && !currentTask.isNew) {
+      const statusesWithDates = [
+        'alpha_draft', 'alpha_review', 
+        'beta_revision', 'beta_review', 
+        'final', 'final_signoff_sent', 'final_signoff'
+      ];
+      const isChangingToNoStatus = value === '';
+      const currentHasDates = statusesWithDates.includes(currentTask.status);
+      
+      if (isChangingToNoStatus && currentHasDates) {
+        const confirmed = window.confirm(
+          `Warning: Changing from "${currentTask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}" to "No Status" will clear ALL phase dates including:\n\n• All start dates (Alpha Draft, Alpha Review, Beta Revision, Beta Review, Final, Final Signoff Sent, Final Signoff Received)\n• All end dates (where applicable)\n• All completion dates\n• Basic task dates (start, finish, completed)\n\nThis action cannot be undone. Do you want to continue?`
+        );
+        
+        if (!confirmed) {
+          return; // Don't update if user cancels
+        }
+      }
+    }
+    
     updatedTasks[index] = { ...updatedTasks[index], [field]: value };
     setTasks(updatedTasks);
     

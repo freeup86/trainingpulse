@@ -21,13 +21,14 @@ import {
   EyeOff,
   Lock,
   UserCheck,
-  ListTodo
+  ListTodo,
+  Layers
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
-import { statuses, users, roles, permissions, phaseStatuses } from '../lib/api';
+import { statuses, users, roles, permissions, phaseStatuses, modalityTasks } from '../lib/api';
 
 // Status icons mapping
 const STATUS_ICONS = {
@@ -104,6 +105,25 @@ export default function AdminPage() {
     isDefault: false,
     completionPercentage: 0
   });
+
+  // Modality phases management state
+  const [selectedModality, setSelectedModality] = useState('WBT');
+  const [editingModalityTask, setEditingModalityTask] = useState(null);
+  const [isCreatingModalityTask, setIsCreatingModalityTask] = useState(false);
+  const [modalityTaskFormData, setModalityTaskFormData] = useState({
+    modality: 'WBT',
+    task_type: '',
+    order_index: 1,
+    weight_percentage: 100
+  });
+
+  const MODALITY_OPTIONS = [
+    { value: 'WBT', label: 'WBT (Web-Based Training)' },
+    { value: 'ILT/VLT', label: 'ILT/VLT (Instructor-Led/Virtual-Led Training)' },
+    { value: 'Micro Learning', label: 'Micro Learning' },
+    { value: 'SIMS', label: 'SIMS (Software Simulations)' },
+    { value: 'DAP', label: 'DAP (Digital Adoption Platform)' }
+  ];
 
   // Fetch statuses (always call hooks before any returns)
   const { data: statusesData, isLoading, error } = useQuery({
@@ -327,7 +347,7 @@ export default function AdminPage() {
       email: userData.email,
       role: userData.role,
       password: '', // Don't populate password for security
-      isActive: userData.isActive !== false
+      isActive: userData.active !== false // Map 'active' from backend to 'isActive' for frontend
     });
     setIsCreatingUser(false);
     
@@ -375,6 +395,12 @@ export default function AdminPage() {
 
     const submitData = { ...userFormData };
     
+    // Map isActive to active for backend compatibility
+    if (submitData.hasOwnProperty('isActive')) {
+      submitData.active = submitData.isActive;
+      delete submitData.isActive;
+    }
+    
     // Remove password if it's empty (for updates)
     if (!submitData.password) {
       delete submitData.password;
@@ -386,6 +412,114 @@ export default function AdminPage() {
       updateUserMutation.mutate({ id: editingUser, updates: submitData });
     } else {
       createUserMutation.mutate(submitData);
+    }
+  };
+
+  // Modality tasks queries and mutations
+  const { data: modalityTasksData, isLoading: modalityTasksLoading, error: modalityTasksError } = useQuery({
+    queryKey: ['admin-modality-tasks'],
+    queryFn: async () => {
+      const response = await modalityTasks.getAll();
+      return response.data.data;
+    }
+  });
+
+  const createModalityTaskMutation = useMutation({
+    mutationFn: async (taskData) => {
+      const response = await modalityTasks.create(taskData);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-modality-tasks']);
+      toast.success('Modality task created successfully');
+      resetModalityTaskForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to create modality task: ' + (error.response?.data?.error?.message || error.response?.data?.message || error.message));
+    }
+  });
+
+  const updateModalityTaskMutation = useMutation({
+    mutationFn: async ({ id, updates }) => {
+      const response = await modalityTasks.update(id, updates);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-modality-tasks']);
+      toast.success('Modality task updated successfully');
+      resetModalityTaskForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to update modality task: ' + (error.response?.data?.error?.message || error.response?.data?.message || error.message));
+    }
+  });
+
+  const deleteModalityTaskMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await modalityTasks.delete(id);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-modality-tasks']);
+      toast.success('Modality task deleted successfully');
+    },
+    onError: (error) => {
+      toast.error('Failed to delete modality task: ' + (error.response?.data?.error?.message || error.response?.data?.message || error.message));
+    }
+  });
+
+  const resetModalityTaskForm = () => {
+    setModalityTaskFormData({
+      modality: selectedModality,
+      task_type: '',
+      order_index: 1,
+      weight_percentage: 100
+    });
+    setEditingModalityTask(null);
+    setIsCreatingModalityTask(false);
+  };
+
+  const handleEditModalityTask = (task) => {
+    setEditingModalityTask(task.id);
+    setModalityTaskFormData({
+      modality: task.modality,
+      task_type: task.task_type,
+      order_index: task.order_index,
+      weight_percentage: task.weight_percentage || 100
+    });
+    setIsCreatingModalityTask(false);
+  };
+
+  const handleCreateModalityTask = () => {
+    setEditingModalityTask(null);
+    setModalityTaskFormData({
+      modality: selectedModality,
+      task_type: '',
+      order_index: (modalityTasksData?.[selectedModality]?.length || 0) + 1,
+      weight_percentage: 100
+    });
+    setIsCreatingModalityTask(true);
+  };
+
+  const handleModalityTaskSubmit = (e) => {
+    e.preventDefault();
+    
+    if (!modalityTaskFormData.task_type.trim()) {
+      toast.error('Task type is required');
+      return;
+    }
+
+    if (editingModalityTask) {
+      updateModalityTaskMutation.mutate({ 
+        id: editingModalityTask, 
+        updates: {
+          task_type: modalityTaskFormData.task_type,
+          order_index: modalityTaskFormData.order_index,
+          weight_percentage: modalityTaskFormData.weight_percentage
+        }
+      });
+    } else {
+      createModalityTaskMutation.mutate(modalityTaskFormData);
     }
   };
 
@@ -601,6 +735,19 @@ export default function AdminPage() {
             >
               <ListTodo className="h-4 w-4 mr-2" />
               Phase Statuses
+            </button>
+          )}
+          {can.manageSettings && (
+            <button
+              onClick={() => setActiveTab('modality-phases')}
+              className={`${
+                activeTab === 'modality-phases'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center`}
+            >
+              <Layers className="h-4 w-4 mr-2" />
+              Modality Phases
             </button>
           )}
           {can.viewUsers && (
@@ -968,7 +1115,7 @@ export default function AdminPage() {
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
                           {userData.role === 'sme' ? 'SME' : userData.role.charAt(0).toUpperCase() + userData.role.slice(1)}
                         </span>
-                        {userData.isActive === false && (
+                        {userData.active === false && (
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
                             Inactive
                           </span>
@@ -1270,6 +1417,201 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'modality-phases' && can.manageSettings && (
+        /* Modality Phases Management */
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Layers className="h-5 w-5 mr-2" />
+              Modality Phases Management
+            </CardTitle>
+            <CardDescription>
+              Configure the phases/tasks that are automatically created for each modality type when a new course is created.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {/* Modality Selector */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Select Modality
+              </label>
+              <select
+                value={selectedModality}
+                onChange={(e) => {
+                  setSelectedModality(e.target.value);
+                  setModalityTaskFormData(prev => ({ ...prev, modality: e.target.value }));
+                  resetModalityTaskForm();
+                }}
+                className="w-64 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+              >
+                {MODALITY_OPTIONS.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Task Form */}
+            {(isCreatingModalityTask || editingModalityTask) && (
+              <form onSubmit={handleModalityTaskSubmit} className="mb-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                  {isCreatingModalityTask ? 'Add New Phase' : 'Edit Phase'}
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Phase/Task Type *
+                    </label>
+                    <input
+                      type="text"
+                      value={modalityTaskFormData.task_type}
+                      onChange={(e) => setModalityTaskFormData(prev => ({ ...prev, task_type: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="e.g., Outline, Storyboard, Development"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Order Index *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={modalityTaskFormData.order_index}
+                      onChange={(e) => setModalityTaskFormData(prev => ({ ...prev, order_index: parseInt(e.target.value) }))}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Weight Percentage *
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={modalityTaskFormData.weight_percentage}
+                      onChange={(e) => setModalityTaskFormData(prev => ({ ...prev, weight_percentage: parseInt(e.target.value) }))}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="0-100"
+                      required
+                    />
+                    <p className="text-xs text-gray-500 mt-1">% this phase contributes to course progress</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-3 mt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={resetModalityTaskForm}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={createModalityTaskMutation.isPending || updateModalityTaskMutation.isPending}
+                  >
+                    {createModalityTaskMutation.isPending || updateModalityTaskMutation.isPending ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        {isCreatingModalityTask ? 'Create Phase' : 'Update Phase'}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {/* Tasks List */}
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                  Phases for {MODALITY_OPTIONS.find(opt => opt.value === selectedModality)?.label}
+                </h3>
+                {!isCreatingModalityTask && !editingModalityTask && (
+                  <Button onClick={handleCreateModalityTask}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Phase
+                  </Button>
+                )}
+              </div>
+
+              {modalityTasksLoading ? (
+                <div className="text-center py-4 text-gray-600 dark:text-gray-300">Loading phases...</div>
+              ) : modalityTasksData?.[selectedModality] && modalityTasksData[selectedModality].length > 0 ? (
+                <div className="space-y-2">
+                  {modalityTasksData[selectedModality]
+                    .sort((a, b) => a.order_index - b.order_index)
+                    .map((task) => (
+                      <div
+                        key={task.id}
+                        className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg"
+                      >
+                        <div className="flex items-center space-x-4">
+                          <span className="text-sm font-medium text-gray-500 dark:text-gray-400 w-8">
+                            {task.order_index}
+                          </span>
+                          <div>
+                            <h4 className="font-medium text-gray-900 dark:text-white">
+                              {task.task_type}
+                            </h4>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              Order: {task.order_index} • Weight: {task.weight_percentage || 100}%
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditModalityTask(task)}
+                            disabled={editingModalityTask === task.id}
+                          >
+                            <Edit3 className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => {
+                              if (window.confirm(`Are you sure you want to delete the "${task.task_type}" phase? This cannot be undone.`)) {
+                                deleteModalityTaskMutation.mutate(task.id);
+                              }
+                            }}
+                            disabled={deleteModalityTaskMutation.isPending}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                  <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                  <p className="text-gray-500 dark:text-gray-400 mb-2">No phases configured for {selectedModality}</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500 mb-4">Add phases to automatically create tasks when courses of this modality are created</p>
+                  {!isCreatingModalityTask && (
+                    <Button onClick={handleCreateModalityTask}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add First Phase
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
