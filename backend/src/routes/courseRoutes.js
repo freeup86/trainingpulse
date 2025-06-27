@@ -27,6 +27,7 @@ router.put('/:id/subtasks/:subtaskId/phase-history/:historyId', authorizeResourc
 
 // Archived phase data
 router.get('/:id/archived-phases', authorizeResource('course'), courseController.getArchivedPhaseData);
+router.get('/:id/phase-history', authorizeResource('course'), courseController.getCoursePhaseHistory);
 
 // Status operations
 router.get('/:id/status', authorizeResource('course'), courseController.getCourseStatus);

@@ -196,12 +196,43 @@ export default function CourseForm({ courseId = null }) {
   };
 
   const handleDeliverableToggle = (deliverableId) => {
-    setFormData(prev => ({
-      ...prev,
-      deliverables: prev.deliverables.includes(deliverableId)
-        ? prev.deliverables.filter(id => id !== deliverableId)
-        : [...prev.deliverables, deliverableId]
-    }));
+    setFormData(prev => {
+      const isCurrentlySelected = prev.deliverables.includes(deliverableId);
+      
+      // Special handling for WBT modality - Course Wrapper and Custom Content are mutually exclusive
+      if (formData.modality === 'WBT') {
+        const deliverable = availableDeliverables.find(d => d.id === deliverableId);
+        const deliverableName = deliverable?.name;
+        
+        if (deliverableName === 'Course Wrapper' || deliverableName === 'Custom Content') {
+          if (isCurrentlySelected) {
+            // Unchecking - just remove it
+            return {
+              ...prev,
+              deliverables: prev.deliverables.filter(id => id !== deliverableId)
+            };
+          } else {
+            // Checking - remove the other WBT option and add this one
+            const otherWBTOptions = availableDeliverables
+              .filter(d => (d.name === 'Course Wrapper' || d.name === 'Custom Content') && d.id !== deliverableId)
+              .map(d => d.id);
+            
+            return {
+              ...prev,
+              deliverables: prev.deliverables.filter(id => !otherWBTOptions.includes(id)).concat([deliverableId])
+            };
+          }
+        }
+      }
+      
+      // Default behavior for non-WBT modalities or other deliverables
+      return {
+        ...prev,
+        deliverables: isCurrentlySelected
+          ? prev.deliverables.filter(id => id !== deliverableId)
+          : [...prev.deliverables, deliverableId]
+      };
+    });
   };
 
   const handleDeleteClick = () => {
@@ -295,9 +326,14 @@ export default function CourseForm({ courseId = null }) {
     return modalityData?.deliverables || getDeliverablesForModality(formData.modality, deliverablesData);
   }, [modalityData?.deliverables, formData.modality, deliverablesData]);
 
-  // Auto-select all deliverables by default but allow user to uncheck
+  // Auto-select all deliverables by default but allow user to uncheck (except for WBT)
   useEffect(() => {
     if (!isEditing && formData.modality && availableDeliverables.length > 0 && formData.deliverables.length === 0) {
+      // Don't auto-populate for WBT modality - leave checkboxes unchecked
+      if (formData.modality === 'WBT') {
+        return;
+      }
+      
       const allDeliverableIds = availableDeliverables.map(d => d.id);
       setFormData(prev => ({
         ...prev,
@@ -461,8 +497,8 @@ export default function CourseForm({ courseId = null }) {
                       <input
                         type="checkbox"
                         checked={formData.deliverables.includes(deliverable.id)}
-                        onChange={() => handleDeliverableToggle(deliverable.id)}
-                        className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                        readOnly
+                        className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 pointer-events-none"
                       />
                       <div className="ml-3">
                         <h3 className="text-sm font-medium text-gray-900 dark:text-white">

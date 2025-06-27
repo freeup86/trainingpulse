@@ -192,9 +192,9 @@ class SubtaskService {
             'alpha_review': { start: 'alpha_review_start_date', end: 'alpha_review_end_date', completion: 'alpha_review_date' },
             'beta_revision': { start: 'beta_revision_start_date', end: 'beta_revision_end_date', completion: 'beta_revision_date' },
             'beta_review': { start: 'beta_review_start_date', end: 'beta_review_end_date', completion: 'beta_review_date' },
-            'final': { start: 'final_start_date', end: 'final_end_date', completion: 'final_date' },
+            'final_revision': { start: 'final_revision_start_date', end: 'final_revision_end_date', completion: 'final_revision_date' },
             'final_signoff_sent': { start: 'final_signoff_sent_start_date', end: 'final_signoff_sent_end_date', completion: 'final_signoff_sent_date' },
-            'final_signoff': { start: 'final_signoff_start_date', end: null, completion: 'final_signoff_date' }
+            'final_signoff_received': { start: 'final_signoff_received_start_date', end: null, completion: 'final_signoff_received_date' }
           };
           
           // Clear all phase dates
@@ -223,7 +223,7 @@ class SubtaskService {
           }
           
           // Set finish_date when moving to completion statuses
-          const completionStatuses = ['final', 'final_signoff_sent', 'final_signoff', 'completed'];
+          const completionStatuses = ['final_revision', 'final_signoff_sent', 'final_signoff_received', 'completed'];
           const wasNotCompleted = !completionStatuses.includes(oldStatus);
           const isNowCompleted = completionStatuses.includes(newStatus);
           
@@ -244,9 +244,9 @@ class SubtaskService {
             'alpha_review': { start: 'alpha_review_start_date', end: 'alpha_review_end_date', completion: 'alpha_review_date' },
             'beta_revision': { start: 'beta_revision_start_date', end: 'beta_revision_end_date', completion: 'beta_revision_date' },
             'beta_review': { start: 'beta_review_start_date', end: 'beta_review_end_date', completion: 'beta_review_date' },
-            'final': { start: 'final_start_date', end: 'final_end_date', completion: 'final_date' },
+            'final_revision': { start: 'final_revision_start_date', end: 'final_revision_end_date', completion: 'final_revision_date' },
             'final_signoff_sent': { start: 'final_signoff_sent_start_date', end: 'final_signoff_sent_end_date', completion: 'final_signoff_sent_date' },
-            'final_signoff': { start: 'final_signoff_start_date', end: null, completion: 'final_signoff_date' }
+            'final_signoff_received': { start: 'final_signoff_received_start_date', end: null, completion: 'final_signoff_received_date' }
           };
 
           // When moving TO a phase status, set the start date
@@ -273,7 +273,7 @@ class SubtaskService {
           }
 
           // Clear future phase dates when moving backward in the workflow
-          const phaseOrder = ['alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff'];
+          const phaseOrder = ['alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final_revision', 'final_signoff_sent', 'final_signoff_received'];
           const currentPhaseIndex = phaseOrder.indexOf(newStatus);
           const oldPhaseIndex = phaseOrder.indexOf(oldStatus);
           
@@ -398,20 +398,20 @@ class SubtaskService {
           }
           
           // Define phase hierarchy for backward movement detection
-          const phaseHierarchy = ['alpha_review', 'beta_review', 'final', 'final_signoff'];
+          const phaseHierarchy = ['alpha_review', 'beta_review', 'final_revision', 'final_signoff_received'];
           const oldIndex = phaseHierarchy.indexOf(oldStatus);
           const newIndex = phaseHierarchy.indexOf(newStatus);
           const isBackwardMovement = oldIndex > newIndex && oldIndex !== -1 && newIndex !== -1;
           
           // Special handling for Final Signoff status
-          if (newStatus === 'final_signoff' && oldStatus === 'final') {
+          if (newStatus === 'final_signoff_received' && oldStatus === 'final_revision') {
             console.log('DEBUG: Moving to Final Signoff - setting final end date and final signoff date');
             
             // Set the finish date for the Final (Gold) phase in phase_status_history
             await client.query(`
               UPDATE phase_status_history 
               SET finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-              WHERE subtask_id = $1 AND status = 'final' AND finished_at IS NULL
+              WHERE subtask_id = $1 AND status = 'final_revision' AND finished_at IS NULL
             `, [subtaskId]);
             
             // Set the finish_date on the subtask itself (this represents Final Gold completion)
@@ -807,21 +807,21 @@ class SubtaskService {
           cs.alpha_review_date,
           cs.beta_revision_date,
           cs.beta_review_date,
-          cs.final_date,
+          cs.final_revision_date,
           cs.final_signoff_sent_date,
-          cs.final_signoff_date,
+          cs.final_signoff_received_date,
           cs.alpha_draft_start_date,
           cs.alpha_review_start_date,
           cs.beta_revision_start_date,
           cs.beta_review_start_date,
-          cs.final_start_date,
+          cs.final_revision_start_date,
           cs.final_signoff_sent_start_date,
-          cs.final_signoff_start_date,
+          cs.final_signoff_received_start_date,
           cs.alpha_draft_end_date,
           cs.alpha_review_end_date,
           cs.beta_revision_end_date,
           cs.beta_review_end_date,
-          cs.final_end_date,
+          cs.final_revision_end_date,
           cs.final_signoff_sent_end_date,
           cs.created_at,
           cs.updated_at
@@ -847,21 +847,21 @@ class SubtaskService {
           alpha_review_date: subtask.alpha_review_date,
           beta_revision_date: subtask.beta_revision_date,
           beta_review_date: subtask.beta_review_date,
-          final_date: subtask.final_date,
+          final_revision_date: subtask.final_revision_date,
           final_signoff_sent_date: subtask.final_signoff_sent_date,
-          final_signoff_date: subtask.final_signoff_date,
+          final_signoff_received_date: subtask.final_signoff_received_date,
           alpha_draft_start_date: subtask.alpha_draft_start_date,
           alpha_review_start_date: subtask.alpha_review_start_date,
           beta_revision_start_date: subtask.beta_revision_start_date,
           beta_review_start_date: subtask.beta_review_start_date,
-          final_start_date: subtask.final_start_date,
+          final_revision_start_date: subtask.final_revision_start_date,
           final_signoff_sent_start_date: subtask.final_signoff_sent_start_date,
-          final_signoff_start_date: subtask.final_signoff_start_date,
+          final_signoff_received_start_date: subtask.final_signoff_received_start_date,
           alpha_draft_end_date: subtask.alpha_draft_end_date,
           alpha_review_end_date: subtask.alpha_review_end_date,
           beta_revision_end_date: subtask.beta_revision_end_date,
           beta_review_end_date: subtask.beta_review_end_date,
-          final_end_date: subtask.final_end_date,
+          final_revision_end_date: subtask.final_revision_end_date,
           final_signoff_sent_end_date: subtask.final_signoff_sent_end_date,
           created_at: subtask.created_at,
           updated_at: subtask.updated_at

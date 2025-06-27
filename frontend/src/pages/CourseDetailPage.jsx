@@ -19,7 +19,8 @@ import {
   PlayCircle,
   Trash2,
   X,
-  Package
+  Package,
+  History
 } from 'lucide-react';
 import { courses, statuses, phaseStatuses } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
@@ -27,6 +28,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import WorkflowMapModal from '../components/WorkflowMapModal';
+import PhaseHistoryModal from '../components/PhaseHistoryModal';
 
 // Independent status definitions (separate from workflow)
 const COURSE_STATUSES = {
@@ -103,6 +105,7 @@ export default function CourseDetailPage() {
   const { user } = useAuth();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showWorkflowMap, setShowWorkflowMap] = useState(false);
+  const [showPhaseHistory, setShowPhaseHistory] = useState(false);
 
   const { data: courseData, isLoading, error } = useQuery({
     queryKey: ['course', id],
@@ -443,7 +446,7 @@ export default function CourseDetailPage() {
                               
                               // Fallback for hardcoded statuses
                               switch (status) {
-                                case 'final':
+                                case 'final_revision':
                                   return <PlayCircle className="h-4 w-4 text-yellow-600" />;
                                 case 'beta_review':
                                   return <PlayCircle className="h-4 w-4 text-orange-500" />;
@@ -475,7 +478,7 @@ export default function CourseDetailPage() {
                               
                               // Fallback for hardcoded statuses
                               switch (status) {
-                                case 'final':
+                                case 'final_revision':
                                   return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200';
                                 case 'beta_review':
                                   return 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300';
@@ -494,7 +497,7 @@ export default function CourseDetailPage() {
                               
                               // Fallback for hardcoded statuses
                               switch (status) {
-                                case 'final':
+                                case 'final_revision':
                                   return 10;
                                 case 'beta_review':
                                   return 30;
@@ -553,7 +556,7 @@ export default function CourseDetailPage() {
                                             const foundStatus = phaseStatusesData?.find(s => s.value === subtask.status);
                                             
                                             return foundStatus?.label || 
-                                                   (subtask.status === 'final' ? 'Final (Gold)' : 
+                                                   (subtask.status === 'final_revision' ? 'Final (Gold)' : 
                                                     subtask.status === '' ? 'No Status' : 
                                                     subtask.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()));
                                           })()}
@@ -575,9 +578,9 @@ export default function CourseDetailPage() {
                                             { label: 'Alpha Review', start: subtask.alpha_review_start_date, end: subtask.alpha_review_end_date },
                                             { label: 'Beta Revision', start: subtask.beta_revision_start_date, end: subtask.beta_revision_end_date },
                                             { label: 'Beta Review', start: subtask.beta_review_start_date, end: subtask.beta_review_end_date },
-                                            { label: 'Final Revision', start: subtask.final_start_date, end: subtask.final_end_date },
+                                            { label: 'Final Revision', start: subtask.final_revision_start_date, end: subtask.final_revision_end_date },
                                             { label: 'Final Signoff Sent', start: subtask.final_signoff_sent_start_date, end: subtask.final_signoff_sent_end_date },
-                                            { label: 'Final Signoff Received', start: subtask.final_signoff_start_date, end: null }
+                                            { label: 'Final Signoff Received', start: subtask.final_signoff_received_start_date, end: null }
                                           ].filter(phase => phase.start || phase.end);
 
                                           return phaseData.length > 0 && (
@@ -650,7 +653,16 @@ export default function CourseDetailPage() {
           {/* Dates */}
           <Card>
             <CardHeader>
-              <CardTitle>Important Dates</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle>Important Dates</CardTitle>
+                <button
+                  onClick={() => setShowPhaseHistory(true)}
+                  className="inline-flex items-center px-3 py-1 text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 rounded-md transition-colors"
+                >
+                  <History className="h-3 w-3 mr-1" />
+                  View History
+                </button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center space-x-2">
@@ -825,6 +837,15 @@ export default function CourseDetailPage() {
           courseName={course.title}
           currentWorkflowState={course.workflowState || course.workflow_state}
           onClose={() => setShowWorkflowMap(false)}
+        />
+      )}
+
+      {/* Phase History Modal */}
+      {showPhaseHistory && (
+        <PhaseHistoryModal
+          courseId={id}
+          courseName={course.title}
+          onClose={() => setShowPhaseHistory(false)}
         />
       )}
     </div>

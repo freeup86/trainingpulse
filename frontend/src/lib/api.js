@@ -134,6 +134,10 @@ export const courses = {
   updatePhaseStatusHistory: (courseId, subtaskId, historyId, dateData) =>
     api.put(`/courses/${courseId}/subtasks/${subtaskId}/phase-history/${historyId}`, dateData),
     
+  // Course phase history from archives
+  getPhaseHistory: (courseId) =>
+    api.get(`/courses/${courseId}/phase-history`),
+    
   recalculateStatus: (courseId) =>
     api.post(`/courses/${courseId}/recalculate-status`),
     

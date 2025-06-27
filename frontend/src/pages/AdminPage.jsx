@@ -871,14 +871,14 @@ export default function AdminPage() {
                   </select>
                 </div>
               </div>
-              <div className="flex items-center space-x-2">
-                <Button type="submit" disabled={isLoading_mutations}>
-                  <Save className="h-4 w-4 mr-2" />
-                  {editingStatus ? 'Update' : 'Create'} Status
-                </Button>
+              <div className="flex items-center justify-end space-x-2">
                 <Button type="button" variant="outline" onClick={resetForm}>
                   <X className="h-4 w-4 mr-2" />
                   Cancel
+                </Button>
+                <Button type="submit" disabled={isLoading_mutations}>
+                  <Save className="h-4 w-4 mr-2" />
+                  {editingStatus ? 'Update' : 'Create'} Status
                 </Button>
               </div>
             </form>
@@ -1320,20 +1320,20 @@ export default function AdminPage() {
                         </label>
                       </div>
 
-                    <div className="flex space-x-2">
-                      <Button
-                        type="submit"
-                        disabled={createPhaseStatusMutation.isPending || updatePhaseStatusMutation.isPending}
-                      >
-                        {createPhaseStatusMutation.isPending || updatePhaseStatusMutation.isPending ? 'Saving...' : 
-                         editingPhaseStatus ? 'Update Phase Status' : 'Create Phase Status'}
-                      </Button>
+                    <div className="flex justify-end space-x-2">
                       <Button
                         type="button"
                         variant="outline"
                         onClick={resetPhaseStatusForm}
                       >
                         Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={createPhaseStatusMutation.isPending || updatePhaseStatusMutation.isPending}
+                      >
+                        {createPhaseStatusMutation.isPending || updatePhaseStatusMutation.isPending ? 'Saving...' : 
+                         editingPhaseStatus ? 'Update Phase Status' : 'Create Phase Status'}
                       </Button>
                     </div>
                   </form>

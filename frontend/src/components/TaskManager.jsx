@@ -44,8 +44,8 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     // Fallback to hardcoded statuses if database is unavailable
     { value: 'alpha_review', label: 'Alpha Review', icon: PlayCircle, color: 'text-blue-500' },
     { value: 'beta_review', label: 'Beta Review', icon: PlayCircle, color: 'text-orange-500' },
-    { value: 'final', label: 'Final (Gold)', icon: PlayCircle, color: 'text-yellow-600' },
-    { value: 'final_signoff', label: 'Final Signoff Received', icon: PlayCircle, color: 'text-green-600' }
+    { value: 'final_revision', label: 'Final (Gold)', icon: PlayCircle, color: 'text-yellow-600' },
+    { value: 'final_signoff_received', label: 'Final Signoff Received', icon: PlayCircle, color: 'text-green-600' }
   ];
   const [tasks, setTasks] = useState(
     (initialTasks || []).map(task => ({
@@ -59,21 +59,67 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     }))
   );
   const [isDragOver, setIsDragOver] = useState(false);
+  const [autoSaveTimeouts, setAutoSaveTimeouts] = useState({});
+  const [pendingUpdates, setPendingUpdates] = useState({});
 
   // Update tasks when initialTasks changes (for when course data loads)
+  // Respect pending updates to prevent flicker
   useEffect(() => {
     if (initialTasks && initialTasks.length > 0) {
-      setTasks(initialTasks.map(task => ({
-        id: task.id,
-        title: task.title || '',
-        status: task.status || 'pending',
-        isBlocking: task.is_blocking || false,
-        weight: task.weight || 1,
-        orderIndex: task.order_index || 0,
-        isNew: false
-      })));
+      setTasks(prevTasks => {
+        // If we have no tasks yet, initialize from server data
+        if (prevTasks.length === 0) {
+          return initialTasks.map(task => ({
+            id: task.id,
+            title: task.title || '',
+            status: task.status || 'pending',
+            isBlocking: task.is_blocking || false,
+            weight: task.weight || 1,
+            orderIndex: task.order_index || 0,
+            isNew: false
+          }));
+        }
+        
+        // Otherwise, merge server data with local changes, respecting pending updates
+        return initialTasks.map(serverTask => {
+          const existingTask = prevTasks.find(t => t.id === serverTask.id);
+          const hasPendingUpdate = pendingUpdates[serverTask.id];
+          
+          if (existingTask && hasPendingUpdate) {
+            // Keep local state for tasks with pending updates
+            return existingTask;
+          }
+          
+          // Update from server for tasks without pending updates
+          return existingTask ? {
+            ...existingTask,
+            status: serverTask.status || 'pending',
+            title: serverTask.title || existingTask.title,
+            isBlocking: serverTask.is_blocking || false,
+            weight: serverTask.weight || 1,
+            orderIndex: serverTask.order_index || 0,
+          } : {
+            id: serverTask.id,
+            title: serverTask.title || '',
+            status: serverTask.status || 'pending',
+            isBlocking: serverTask.is_blocking || false,
+            weight: serverTask.weight || 1,
+            orderIndex: serverTask.order_index || 0,
+            isNew: false
+          };
+        });
+      });
     }
-  }, [initialTasks]);
+  }, [initialTasks, pendingUpdates]);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(autoSaveTimeouts).forEach(timeoutId => {
+        clearTimeout(timeoutId);
+      });
+    };
+  }, [autoSaveTimeouts]);
 
   // Create subtask mutation
   const createSubtaskMutation = useMutation({
@@ -93,6 +139,34 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
   const updateSubtaskMutation = useMutation({
     mutationFn: ({ subtaskId, updateData }) => 
       courses.updateSubtask(courseId, subtaskId, updateData),
+    onMutate: async ({ subtaskId, updateData }) => {
+      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries(['course', courseId]);
+      
+      // Snapshot the previous value for rollback
+      const previousCourse = queryClient.getQueryData(['course', courseId]);
+      
+      // Optimistically update the cache
+      queryClient.setQueryData(['course', courseId], (old) => {
+        if (!old || !old.data) return old;
+        
+        const updatedSubtasks = old.data.subtasks?.map(subtask => 
+          subtask.id === subtaskId 
+            ? { ...subtask, ...updateData }
+            : subtask
+        ) || [];
+        
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            subtasks: updatedSubtasks
+          }
+        };
+      });
+      
+      return { previousCourse };
+    },
     onSuccess: (data, variables) => {
       // Show different messages for status vs other updates
       if (variables.updateData.status && Object.keys(variables.updateData).length === 1) {
@@ -100,12 +174,25 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
       } else {
         toast.success('Phase updated successfully');
       }
-      if (courseId) {
-        queryClient.invalidateQueries(['course', courseId]);
+    },
+    onError: (error, variables, context) => {
+      toast.error(error.response?.data?.error?.message || 'Failed to update phase');
+      
+      // Revert the optimistic update on error
+      if (context?.previousCourse) {
+        queryClient.setQueryData(['course', courseId], context.previousCourse);
       }
     },
-    onError: (error) => {
-      toast.error(error.response?.data?.error?.message || 'Failed to update phase');
+    onSettled: (data, error, variables) => {
+      // Clear pending update for this task
+      setPendingUpdates(prev => {
+        const newPending = { ...prev };
+        delete newPending[variables.subtaskId];
+        return newPending;
+      });
+      
+      // Always refetch after mutation to ensure data consistency
+      queryClient.invalidateQueries(['course', courseId]);
     }
   });
 
@@ -150,7 +237,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
       const statusesWithDates = [
         'alpha_draft', 'alpha_review', 
         'beta_revision', 'beta_review', 
-        'final', 'final_signoff_sent', 'final_signoff'
+        'final_revision', 'final_signoff_sent', 'final_signoff_received'
       ];
       const isChangingToNoStatus = value === '';
       const currentHasDates = statusesWithDates.includes(currentTask.status);
@@ -169,9 +256,31 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     updatedTasks[index] = { ...updatedTasks[index], [field]: value };
     setTasks(updatedTasks);
     
-    // Auto-save status changes for existing tasks
+    // Auto-save status changes for existing tasks (with debouncing)
     if (field === 'status' && courseId && !updatedTasks[index].isNew) {
-      autoSaveStatus(updatedTasks[index], value);
+      const taskId = updatedTasks[index].id;
+      
+      // Clear existing timeout for this task
+      if (autoSaveTimeouts[taskId]) {
+        clearTimeout(autoSaveTimeouts[taskId]);
+      }
+      
+      // Set new timeout for auto-save
+      const timeoutId = setTimeout(() => {
+        // Track that this task has a pending update
+        setPendingUpdates(prev => ({ ...prev, [taskId]: value }));
+        autoSaveStatus(updatedTasks[index], value);
+        setAutoSaveTimeouts(prev => {
+          const newTimeouts = { ...prev };
+          delete newTimeouts[taskId];
+          return newTimeouts;
+        });
+      }, 300); // 300ms debounce
+      
+      setAutoSaveTimeouts(prev => ({
+        ...prev,
+        [taskId]: timeoutId
+      }));
     }
   };
 
@@ -298,7 +407,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
     
     // Fallback for hardcoded statuses or unknown statuses
     switch (status) {
-      case 'final':
+      case 'final_revision':
         return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200';
       case 'beta_review':
         return 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300';
@@ -409,7 +518,7 @@ const TaskManager = forwardRef(({ courseId, initialTasks = [], isEditing = false
                     {/* Status Badge */}
                     <div className="flex items-center space-x-2">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeColor(task.status)}`}>
-                        {task.status === 'final' ? 'Final (Gold)' : task.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        {task.status === 'final_revision' ? 'Final (Gold)' : task.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                       </span>
                     </div>
                   </div>

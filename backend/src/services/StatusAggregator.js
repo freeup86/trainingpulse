@@ -56,8 +56,8 @@ class StatusAggregator {
           SUM(
             COALESCE(mt.weight_percentage, 100) * COALESCE(ps.completion_percentage, 0) / 100.0
           ) as weighted_completion_points,
-          COUNT(CASE WHEN cs.status = 'final_signoff' THEN 1 END) as final_signoff_count,
-          COUNT(CASE WHEN cs.is_blocking = true AND cs.status NOT IN ('completed', 'final_signoff') THEN 1 END) as blocking_incomplete
+          COUNT(CASE WHEN cs.status = 'final_signoff_received' THEN 1 END) as final_signoff_count,
+          COUNT(CASE WHEN cs.is_blocking = true AND cs.status NOT IN ('completed', 'final_signoff_received') THEN 1 END) as blocking_incomplete
         FROM course_subtasks cs
         LEFT JOIN courses c ON cs.course_id = c.id
         LEFT JOIN modality_tasks mt ON c.modality = mt.modality AND cs.task_type = mt.task_type
@@ -606,7 +606,7 @@ class StatusAggregator {
    */
   async resetPhaseData(client, courseId) {
     try {
-      // Reset all subtask statuses to empty (No Status)
+      // Reset all subtask statuses to empty (No Status) and clear ALL phase-specific dates
       await client.query(`
         UPDATE course_subtasks
         SET 
@@ -614,6 +614,27 @@ class StatusAggregator {
           start_date = NULL,
           finish_date = NULL,
           completed_at = NULL,
+          -- Clear all phase-specific date columns
+          alpha_draft_start_date = NULL,
+          alpha_draft_end_date = NULL,
+          alpha_draft_date = NULL,
+          alpha_review_start_date = NULL,
+          alpha_review_end_date = NULL,
+          alpha_review_date = NULL,
+          beta_revision_start_date = NULL,
+          beta_revision_end_date = NULL,
+          beta_revision_date = NULL,
+          beta_review_start_date = NULL,
+          beta_review_end_date = NULL,
+          beta_review_date = NULL,
+          final_revision_start_date = NULL,
+          final_revision_end_date = NULL,
+          final_revision_date = NULL,
+          final_signoff_sent_start_date = NULL,
+          final_signoff_sent_end_date = NULL,
+          final_signoff_sent_date = NULL,
+          final_signoff_received_start_date = NULL,
+          final_signoff_received_date = NULL,
           updated_at = CURRENT_TIMESTAMP
         WHERE course_id = $1
       `, [courseId]);
@@ -627,7 +648,8 @@ class StatusAggregator {
       `, [courseId]);
       
       logger.info('Reset phase data for new course status', {
-        courseId
+        courseId,
+        message: 'Cleared all phase statuses, dates, and history'
       });
       
     } catch (error) {

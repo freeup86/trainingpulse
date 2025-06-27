@@ -52,7 +52,7 @@ const updateCourseSchema = Joi.object({
 });
 
 // Dynamic subtask schema that will be updated with valid phase statuses
-const createSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff']) => {
+const createSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final_revision', 'final_signoff_sent', 'final_signoff_received']) => {
   return Joi.object({
     title: Joi.string().min(1).max(255).required().trim(),
     status: Joi.string().valid(...validStatuses).default(''),
@@ -64,7 +64,7 @@ const createSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'com
   });
 };
 
-const updateSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff']) => {
+const updateSubtaskSchema = (validStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final_revision', 'final_signoff_sent', 'final_signoff_received']) => {
   return Joi.object({
     title: Joi.string().min(1).max(255).optional().trim(),
     status: Joi.string().valid(...validStatuses).optional(),
@@ -99,7 +99,7 @@ class CourseController {
     } catch (error) {
       console.error('DEBUG: Error loading phase statuses from DB:', error.message);
       // Fallback to hardcoded statuses if phase_statuses table doesn't exist
-      const fallbackStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final', 'final_signoff_sent', 'final_signoff'];
+      const fallbackStatuses = ['', 'pending', 'in_progress', 'completed', 'on_hold', 'alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final_revision', 'final_signoff_sent', 'final_signoff_received'];
       console.log('DEBUG: Using fallback statuses:', fallbackStatuses);
       return fallbackStatuses;
     }
@@ -600,6 +600,100 @@ class CourseController {
         subtasks,
         availableTransitions: availableTransitions.rows,
         statusData
+      }
+    });
+  });
+
+  /**
+   * GET /courses/:id/phase-history - Get course phase history from archives
+   */
+  getCoursePhaseHistory = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Check if course exists
+    const courseResult = await query('SELECT id, title FROM courses WHERE id = $1', [id]);
+    if (courseResult.rows.length === 0) {
+      throw new NotFoundError('Course not found');
+    }
+
+    // Get phase history from archives, ordered by course status
+    const historyResult = await query(`
+      SELECT 
+        cpa.course_status,
+        cpa.subtask_title,
+        cpa.phase_status,
+        cpa.phase_history,
+        cpa.start_date,
+        cpa.finish_date,
+        cpa.completed_at,
+        cpa.archived_at,
+        u.name as archived_by_name
+      FROM course_phase_archives cpa
+      LEFT JOIN users u ON cpa.archived_by = u.id
+      WHERE cpa.course_id = $1
+      ORDER BY 
+        CASE cpa.course_status 
+          WHEN 'pre_development' THEN 1
+          WHEN 'outlines' THEN 2
+          WHEN 'storyboard' THEN 3
+          WHEN 'development' THEN 4
+          WHEN 'completed' THEN 5
+          ELSE 6
+        END,
+        cpa.archived_at ASC,
+        cpa.subtask_title ASC
+    `, [id]);
+
+    // Group the results by course status
+    const groupedHistory = historyResult.rows.reduce((acc, row) => {
+      const status = row.course_status;
+      if (!acc[status]) {
+        acc[status] = [];
+      }
+      
+      // Parse phase history JSON if it exists
+      let phaseHistory = [];
+      if (row.phase_history) {
+        try {
+          // Handle both JSON string and object formats
+          if (typeof row.phase_history === 'string') {
+            phaseHistory = JSON.parse(row.phase_history);
+          } else if (Array.isArray(row.phase_history)) {
+            phaseHistory = row.phase_history;
+          } else {
+            // If it's an object but not an array, it might be malformed
+            phaseHistory = [];
+          }
+        } catch (e) {
+          logger.warn('Failed to parse phase history JSON', { 
+            courseId: id, 
+            subtaskTitle: row.subtask_title,
+            phaseHistoryType: typeof row.phase_history,
+            error: e.message 
+          });
+        }
+      }
+
+      acc[status].push({
+        subtaskTitle: row.subtask_title,
+        phaseStatus: row.phase_status,
+        phaseHistory,
+        startDate: row.start_date,
+        finishDate: row.finish_date,
+        completedAt: row.completed_at,
+        archivedAt: row.archived_at,
+        archivedByName: row.archived_by_name
+      });
+      
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        courseId: parseInt(id),
+        courseTitle: courseResult.rows[0].title,
+        phaseHistory: groupedHistory
       }
     });
   });

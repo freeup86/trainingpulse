@@ -24,7 +24,7 @@ import {
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { courses, statuses, phaseStatuses, users } from '../lib/api';
+import { courses, statuses, phaseStatuses, users, modalityTasks } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
 
 // Independent status definitions (separate from workflow)
@@ -115,12 +115,66 @@ const WORKFLOW_PROGRESSION = {
   'archived': [] // Terminal state
 };
 
-// Helper function to calculate progress based on phase completion percentages
-const calculateProgress = (subtasks, phaseStatuses) => {
+// Helper function to calculate progress based on phase completion percentages and modality weights
+const calculateProgress = (subtasks, phaseStatuses, modalityTasksData, courseModality) => {
   if (!subtasks || subtasks.length === 0) return 0;
   
   // If we have phase status data, use completion percentages
   if (phaseStatuses && phaseStatuses.length > 0) {
+    // Try to use weighted calculation if modality tasks data is available
+    
+    if (modalityTasksData && courseModality) {
+      let modalityTasks = [];
+      
+      if (Array.isArray(modalityTasksData)) {
+        // If it's an array, filter by modality
+        modalityTasks = modalityTasksData.filter(mt => mt.modality === courseModality);
+      } else if (typeof modalityTasksData === 'object') {
+        // If it's an object keyed by modality, access directly
+        if (modalityTasksData[courseModality]) {
+          modalityTasks = modalityTasksData[courseModality];
+        } else {
+          // Try other patterns
+          modalityTasks = modalityTasksData.data?.[courseModality] ||
+                         Object.values(modalityTasksData).flat().filter(mt => mt?.modality === courseModality) ||
+                         [];
+        }
+      }
+      
+      // Ensure modalityTasks is always an array
+      if (!Array.isArray(modalityTasks)) {
+        modalityTasks = [];
+      }
+      
+      
+      if (modalityTasks.length > 0) {
+        let weightedProgress = 0;
+        let totalWeight = 0;
+        
+        subtasks.forEach(task => {
+          const statusConfig = phaseStatuses.find(s => s.value === task.status);
+          const completionPercentage = statusConfig?.completionPercentage || 0;
+          
+          // Find matching modality task by task_type
+          const modalityTask = modalityTasks.find(mt => 
+            mt.task_type?.toLowerCase() === task.title?.toLowerCase() ||
+            mt.title?.toLowerCase() === task.title?.toLowerCase() ||
+            mt.name?.toLowerCase() === task.title?.toLowerCase()
+          );
+          
+          const weight = modalityTask?.weight_percentage || (100 / subtasks.length); // Equal weight as fallback
+          
+          
+          weightedProgress += (completionPercentage * weight / 100);
+          totalWeight += weight;
+        });
+        
+        // Normalize to 100% if total weight isn't exactly 100
+        return totalWeight > 0 ? Math.round(weightedProgress * 100 / totalWeight) : 0;
+      }
+    }
+    
+    // Fallback to simple average if no modality weights available
     const totalPercentage = subtasks.reduce((sum, task) => {
       const statusConfig = phaseStatuses.find(s => s.value === task.status);
       const completionPercentage = statusConfig?.completionPercentage || 0;
@@ -130,7 +184,7 @@ const calculateProgress = (subtasks, phaseStatuses) => {
   }
   
   // Fallback to simple completion count
-  const completedCount = subtasks.filter(st => st.status === 'completed' || st.status === 'final').length;
+  const completedCount = subtasks.filter(st => st.status === 'completed' || st.status === 'final_revision').length;
   return Math.round((completedCount / subtasks.length) * 100);
 };
 
@@ -1103,16 +1157,29 @@ function CourseProgress({ courseId, fallbackPercentage = 0 }) {
     refetchOnWindowFocus: false,
     refetchOnMount: false
   });
+
+  const { data: modalityTasksData, isLoading: modalityLoading } = useQuery({
+    queryKey: ['modality-tasks'],
+    queryFn: async () => {
+      const response = await modalityTasks.getAll();
+      // Handle different possible response structures
+      return response.data?.data || response.data || [];
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
+  });
   
   const course = courseData?.data?.data || courseData?.data || {};
   const subtasks = course.subtasks || [];
   
   const progressPercentage = subtasks.length > 0 && phaseStatusesData 
-    ? calculateProgress(subtasks, phaseStatusesData) 
+    ? calculateProgress(subtasks, phaseStatusesData, modalityTasksData, course.modality) 
     : fallbackPercentage;
   
   // Show loading state
-  if (courseLoading || statusLoading) {
+  if (courseLoading || statusLoading || modalityLoading) {
     return (
       <div className="w-32">
         <div className="animate-pulse bg-gray-300 dark:bg-gray-600 h-2 rounded-full"></div>
@@ -1158,6 +1225,7 @@ function CoursePhases({ courseId }) {
   const [tempDateValue, setTempDateValue] = useState(''); // For storing temporary date input
   const [editingAssignmentId, setEditingAssignmentId] = useState(null);
   const [tempAssignment, setTempAssignment] = useState({});
+
 
   // Fetch phase statuses from database
   const { data: phaseStatusesData } = useQuery({
@@ -1238,19 +1306,15 @@ function CoursePhases({ courseId }) {
     mutationFn: ({ subtaskId, updateData }) => 
       courses.updateSubtask(courseId, subtaskId, updateData),
     onSuccess: (data, variables) => {
-      queryClient.invalidateQueries(['course', courseId]);
-      queryClient.invalidateQueries(['courses']);
-      
       // Only close status editing if we're updating status
       if (variables.updateData.status !== undefined) {
         setEditingTaskId(null);
-        setTempStatus(prev => {
-          const newStatus = { ...prev };
-          delete newStatus[variables.subtaskId];
-          return newStatus;
-        });
         toast.success('Phase status updated successfully');
       }
+      
+      // Invalidate queries immediately but don't clear tempStatus yet
+      queryClient.invalidateQueries(['course', courseId]);
+      queryClient.invalidateQueries(['courses']);
       
       // Assignment updates are handled in the specific callback
     },
@@ -1350,7 +1414,7 @@ function CoursePhases({ courseId }) {
     const statusesWithDates = [
       'alpha_draft', 'alpha_review', 
       'beta_revision', 'beta_review', 
-      'final', 'final_signoff_sent', 'final_signoff'
+      'final_revision', 'final_signoff_sent', 'final_signoff_received'
     ];
     const isChangingToNoStatus = newStatus === '';
     const currentHasDates = statusesWithDates.includes(currentStatus);
@@ -1431,6 +1495,26 @@ function CoursePhases({ courseId }) {
 
   const subtasks = courseData?.data?.data?.subtasks || [];
 
+  // Auto-clear tempStatus when server data matches what we expect
+  React.useEffect(() => {
+    if (Object.keys(tempStatus).length === 0) return;
+    
+    const updatedTempStatus = { ...tempStatus };
+    let hasChanges = false;
+    
+    subtasks?.forEach(task => {
+      const taskId = task.id || task.subtask_id || task.subtaskId;
+      if (tempStatus[taskId] && task.status === tempStatus[taskId]) {
+        delete updatedTempStatus[taskId];
+        hasChanges = true;
+      }
+    });
+    
+    if (hasChanges) {
+      setTempStatus(updatedTempStatus);
+    }
+  }, [subtasks, tempStatus]);
+
   if (isLoading) {
     return (
       <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
@@ -1470,8 +1554,8 @@ function CoursePhases({ courseId }) {
       { value: '', label: 'No Status', color: 'text-gray-500 dark:text-gray-400' },
       { value: 'alpha_review', label: 'Alpha Review', color: 'text-blue-500 dark:text-blue-400' },
       { value: 'beta_review', label: 'Beta Review', color: 'text-orange-500 dark:text-orange-400' },
-      { value: 'final', label: 'Final (Gold)', color: 'text-yellow-600 dark:text-yellow-500' },
-      { value: 'final_signoff', label: 'Final Signoff Received', color: 'text-green-600 dark:text-green-400' }
+      { value: 'final_revision', label: 'Final (Gold)', color: 'text-yellow-600 dark:text-yellow-500' },
+      { value: 'final_signoff_received', label: 'Final Signoff Received', color: 'text-green-600 dark:text-green-400' }
     ];
 
   return (
@@ -1497,8 +1581,11 @@ function CoursePhases({ courseId }) {
         {subtasks.map((task, index) => {
           // Check for different possible ID field names
           const taskId = task.id || task.subtask_id || task.subtaskId || `temp-${index}`;
+          
+          
           const currentTaskStatus = tempStatus[taskId] || task.status;
           const currentStatus = statusOptions.find(opt => opt.value === currentTaskStatus) || statusOptions[0];
+          
           // Get icon from database phase status or fallback to PlayCircle
           const statusConfig = phaseStatusesData?.find(s => s.value === currentTaskStatus);
           const StatusIcon = statusConfig?.icon ? (
@@ -1542,11 +1629,23 @@ function CoursePhases({ courseId }) {
                         onChange={(e) => {
                           e.stopPropagation();
                           const newStatus = e.target.value;
+                          // Prevent double execution by checking if status is already changing
+                          if (currentTaskStatus === newStatus) {
+                            return;
+                          }
+                          
                           // Update temp status immediately
-                          setTempStatus(prev => ({
-                            ...prev,
-                            [taskId]: newStatus
-                          }));
+                          setTempStatus(prev => {
+                            // Don't update if already set to this value
+                            if (prev[taskId] === newStatus) {
+                              return prev;
+                            }
+                            return {
+                              ...prev,
+                              [taskId]: newStatus
+                            };
+                          });
+                          
                           // Then trigger the API update
                           handleStatusUpdate(taskId, newStatus);
                         }}
@@ -1764,22 +1863,22 @@ function CoursePhases({ courseId }) {
                 <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
                   <div className="space-y-1">
                     {/* Final Revision */}
-                    {(task.final_start_date || task.final_end_date) && (
+                    {(task.final_revision_start_date || task.final_revision_end_date) && (
                       <div className="text-xs text-yellow-600 dark:text-yellow-400">
                         <div className="flex items-center space-x-1">
                           <Calendar className="h-3 w-3" />
-                          <span>Final: {task.final_start_date ? formatDate(task.final_start_date) : '—'}</span>
+                          <span>Final: {task.final_revision_start_date ? formatDate(task.final_revision_start_date) : '—'}</span>
                         </div>
-                        {task.final_end_date && (
+                        {task.final_revision_end_date && (
                           <div className="flex items-center space-x-1">
                             <CheckCircle className="h-3 w-3" />
-                            <span>End: {formatDate(task.final_end_date)}</span>
+                            <span>End: {formatDate(task.final_revision_end_date)}</span>
                           </div>
                         )}
                       </div>
                     )}
                     {/* Show dash if no final dates */}
-                    {!task.final_start_date && !task.final_end_date && (
+                    {!task.final_revision_start_date && !task.final_revision_end_date && (
                       <span className="text-gray-400">—</span>
                     )}
                   </div>
@@ -1804,16 +1903,16 @@ function CoursePhases({ courseId }) {
                       </div>
                     )}
                     {/* Final Signoff Received */}
-                    {task.final_signoff_start_date && (
+                    {task.final_signoff_received_start_date && (
                       <div className="text-xs text-green-600 dark:text-green-400">
                         <div className="flex items-center space-x-1">
                           <CheckCircle className="h-3 w-3" />
-                          <span>Received: {formatDate(task.final_signoff_start_date)}</span>
+                          <span>Received: {formatDate(task.final_signoff_received_start_date)}</span>
                         </div>
                       </div>
                     )}
                     {/* Show dash if no signoff dates */}
-                    {!task.final_signoff_sent_start_date && !task.final_signoff_sent_end_date && !task.final_signoff_start_date && (
+                    {!task.final_signoff_sent_start_date && !task.final_signoff_sent_end_date && !task.final_signoff_received_start_date && (
                       <span className="text-gray-400">—</span>
                     )}
                   </div>
