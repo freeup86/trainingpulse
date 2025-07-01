@@ -9,6 +9,23 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
+// Debug endpoint to check if users exist (temporary for debugging)
+router.get('/debug/users', asyncHandler(async (req, res) => {
+  const result = await query('SELECT email, name, role, active FROM users LIMIT 5');
+  res.json({
+    success: true,
+    data: {
+      userCount: result.rows.length,
+      users: result.rows.map(user => ({
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        active: user.active
+      }))
+    }
+  });
+}));
+
 // Validation schemas
 const loginSchema = Joi.object({
   email: Joi.string().email().required().trim().lowercase(),
@@ -52,9 +69,12 @@ function generateTokens(user) {
 
 // POST /auth/login
 router.post('/login', asyncHandler(async (req, res) => {
+  logger.info('Login attempt received', { email: req.body.email, ip: req.ip });
+  
   // Validate input
   const { error, value } = loginSchema.validate(req.body);
   if (error) {
+    logger.warn('Login validation failed', { error: error.details });
     throw new ValidationError('Invalid login data', error.details);
   }
   
@@ -65,6 +85,8 @@ router.post('/login', asyncHandler(async (req, res) => {
     'SELECT id, email, name, role, team_id, active, password FROM users WHERE email = $1',
     [email]
   );
+  
+  logger.info('User query result', { email, userFound: userResult.rows.length > 0 });
   
   if (userResult.rows.length === 0) {
     logger.logSecurityEvent('LOGIN_ATTEMPT_INVALID_EMAIL', {
