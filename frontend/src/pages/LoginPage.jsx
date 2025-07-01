@@ -139,9 +139,9 @@ export function LoginPage() {
           <CardContent className="pt-6">
             <h3 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">Demo Credentials</h3>
             <div className="space-y-1 text-xs text-blue-700 dark:text-blue-300">
-              <p><strong>Admin:</strong> admin@trainingpulse.com / password123</p>
-              <p><strong>Manager:</strong> manager@trainingpulse.com / password123</p>
-              <p><strong>Designer:</strong> designer@trainingpulse.com / password123</p>
+              <p><strong>Admin:</strong> admin@trainingpulse.com / admin123</p>
+              <p><strong>Manager:</strong> manager@trainingpulse.com / admin123</p>
+              <p><strong>Designer:</strong> designer@trainingpulse.com / admin123</p>
             </div>
           </CardContent>
         </Card>

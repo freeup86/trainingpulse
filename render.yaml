@@ -5,7 +5,7 @@ services:
     env: node
     buildCommand: cd backend && npm install
     startCommand: cd backend && npm start
-    plan: starter
+    plan: free
     region: oregon
     buildFilter:
       paths:
@@ -17,15 +17,13 @@ services:
         value: v1
       - key: PORT
         value: 3001
+      # Aiven Database URL - Set this in Render Dashboard
       - key: DATABASE_URL
-        fromDatabase:
-          name: trainingpulse-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: trainingpulse-redis
-          property: connectionString
+        sync: false
+      # Skip Redis if not needed
+      - key: SKIP_REDIS
+        value: true
+      # JWT Configuration
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -36,27 +34,29 @@ services:
         value: 7d
       - key: BCRYPT_ROUNDS
         value: 12
+      # CORS - will be updated with frontend URL after deployment
       - key: CORS_ORIGIN
-        fromService:
-          type: web
-          name: trainingpulse-frontend
-          property: url
+        sync: false
+      # Rate Limiting
       - key: RATE_LIMIT_WINDOW_MS
         value: 60000
       - key: RATE_LIMIT_MAX_REQUESTS
         value: 100
       - key: BULK_RATE_LIMIT_MAX_REQUESTS
         value: 10
+      # Logging
       - key: LOG_LEVEL
         value: info
       - key: ENABLE_REQUEST_LOGGING
         value: true
+      # Email (optional)
       - key: SENDGRID_API_KEY
         sync: false
       - key: FROM_EMAIL
         value: noreply@trainingpulse.com
       - key: FROM_NAME
         value: TrainingPulse
+      # File Upload (optional)
       - key: MAX_FILE_SIZE
         value: 10485760
       - key: AWS_ACCESS_KEY_ID
@@ -67,8 +67,12 @@ services:
         value: us-east-1
       - key: AWS_S3_BUCKET
         value: trainingpulse-uploads
+      # Teams Integration (optional)
       - key: TEAMS_WEBHOOK_URL
         sync: false
+      # SSL Configuration for Aiven
+      - key: NODE_TLS_REJECT_UNAUTHORIZED
+        value: 0
 
   # Frontend Service
   - type: web
@@ -76,19 +80,17 @@ services:
     env: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
-    plan: starter
+    plan: free
     region: oregon
     buildFilter:
       paths:
       - frontend/**
     envVars:
+      # API URL - will be set after backend deployment
       - key: VITE_API_BASE_URL
-        fromService:
-          type: web
-          name: trainingpulse-api
-          envVarKey: RENDER_EXTERNAL_URL
-          property: url
-        suffix: /api/v1
+        sync: false
+      - key: VITE_API_VERSION
+        value: v1
       - key: VITE_APP_NAME
         value: TrainingPulse
       - key: VITE_APP_VERSION
@@ -101,11 +103,7 @@ services:
         value: true
       - key: VITE_ENABLE_BULK_OPERATIONS
         value: true
-      - key: VITE_WS_URL
-        fromService:
-          type: web
-          name: trainingpulse-api
-          property: url
+      # File Upload Configuration
       - key: VITE_MAX_FILE_SIZE
         value: 10485760
       - key: VITE_ALLOWED_FILE_TYPES
@@ -127,18 +125,3 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
-
-  # Redis Cache Service
-  - type: redis
-    name: trainingpulse-redis
-    plan: starter
-    region: oregon
-    maxmemoryPolicy: allkeys-lru
-
-databases:
-  # PostgreSQL Database
-  - name: trainingpulse-db
-    plan: starter
-    region: oregon
-    databaseName: trainingpulse
-    user: trainingpulse_user

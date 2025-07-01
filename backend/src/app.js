@@ -250,6 +250,20 @@ async function startServer() {
     await connectDB();
     logger.info('Database connected successfully');
     
+    // Run migrations in production
+    if (process.env.NODE_ENV === 'production') {
+      try {
+        logger.info('Running database migrations...');
+        const { runMigrations } = require('../migrations/migrate');
+        await runMigrations();
+        logger.info('Database migrations completed successfully');
+      } catch (error) {
+        logger.error('Migration failed:', error);
+        // Don't exit on migration failure in production, log and continue
+        logger.warn('Server starting despite migration failure - manual intervention may be required');
+      }
+    }
+    
     // Initialize Redis connection (optional)
     try {
       const redisClient = await connectRedis();

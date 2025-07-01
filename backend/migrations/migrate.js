@@ -94,9 +94,17 @@ async function runMigrations() {
     
   } catch (error) {
     console.error('Migration failed:', error);
-    process.exit(1);
+    // Only exit if running as standalone script
+    if (require.main === module) {
+      process.exit(1);
+    } else {
+      throw error;
+    }
   } finally {
-    await pool.end();
+    // Only close pool if running as standalone script
+    if (require.main === module) {
+      await pool.end();
+    }
   }
 }
 
