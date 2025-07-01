@@ -76,12 +76,11 @@ services:
 
   # Frontend Service
   - type: web
-    name: trainingpulse-frontend
+    name: trainingpulse
     env: static
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: frontend/dist
     plan: free
-    region: oregon
     buildFilter:
       paths:
       - frontend/**
