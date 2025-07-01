@@ -3,13 +3,18 @@ const logger = require('../utils/logger');
 
 let pool;
 
+// For Aiven compatibility
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
+}
+
 const dbConfig = {
   connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/trainingpulse',
   max: parseInt(process.env.DATABASE_POOL_SIZE) || 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000, // Increased from 2s to 10s
   query_timeout: 30000, // 30 second query timeout
-  ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { 
+  ssl: process.env.DATABASE_URL?.includes('sslmode=require') || process.env.DATABASE_URL?.includes('aivencloud.com') ? { 
     rejectUnauthorized: false,
     sslmode: 'require'
   } : false
