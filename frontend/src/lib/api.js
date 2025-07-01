@@ -14,11 +14,10 @@ const api = axios.create({
 // Request interceptor to add auth token and dynamic baseURL
 api.interceptors.request.use(
   (config) => {
-    // Dynamically set baseURL for each request
-    const { protocol, hostname } = window.location;
-    // Force dynamic URL - ignore env variable for now
-    const dynamicBaseUrl = `${protocol}//${hostname}:3001`;
-    config.baseURL = `${dynamicBaseUrl}/api/${API_VERSION}`;
+    // Use environment variable for API base URL in production
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 
+                       (import.meta.env.DEV ? 'http://localhost:3001' : 'https://rainingpulse-api.onrender.com');
+    config.baseURL = `${apiBaseUrl}/api/${API_VERSION}`;
     
     // Add auth token
     const token = localStorage.getItem('accessToken');
