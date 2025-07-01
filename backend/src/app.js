@@ -1,3 +1,8 @@
+// Set SSL configuration for Aiven before any other requires
+if (process.env.NODE_ENV === 'production' && process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -62,6 +67,15 @@ app.use((req, res, next) => {
   if (process.env.NODE_ENV === 'development' && origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  // Handle production CORS
+  if (process.env.NODE_ENV === 'production') {
+    const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [];
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
   }
   
   // Handle preflight requests
