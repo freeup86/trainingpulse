@@ -466,4 +466,202 @@ export const modalityTasks = {
     api.post('/modality/tasks/reorder', { modality, taskIds }),
 };
 
+export const programs = {
+  getAll: (params = {}) =>
+    api.get('/programs', { params }),
+  
+  getById: (id) =>
+    api.get(`/programs/${id}`),
+  
+  create: (data) =>
+    api.post('/programs', data),
+  
+  update: (id, data) =>
+    api.put(`/programs/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/programs/${id}`),
+  
+  // Member management
+  addMember: (id, memberData) =>
+    api.post(`/programs/${id}/members`, memberData),
+  
+  removeMember: (id, userId) =>
+    api.delete(`/programs/${id}/members/${userId}`),
+  
+  // Course operations
+  duplicateCourse: (courseId, data = {}) =>
+    api.post(`/programs/courses/${courseId}/duplicate`, data),
+};
+
+export const folders = {
+  // Get all folders in a program
+  getAll: (params = {}) =>
+    api.get('/folders', { params }),
+  
+  getById: (id) =>
+    api.get(`/folders/${id}`),
+  
+  create: (data) =>
+    api.post('/folders', data),
+  
+  update: (id, data) =>
+    api.put(`/folders/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/folders/${id}`),
+  
+  reorder: (data) =>
+    api.post('/folders/reorder', data),
+};
+
+export const lists = {
+  // Get all lists in a folder
+  getAll: (params = {}) =>
+    api.get('/lists', { params }),
+  
+  getById: (id) =>
+    api.get(`/lists/${id}`),
+  
+  create: (data) =>
+    api.post('/lists', data),
+  
+  update: (id, data) =>
+    api.put(`/lists/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/lists/${id}`),
+  
+  reorder: (data) =>
+    api.post('/lists/reorder', data),
+  
+  move: (id, data) =>
+    api.post(`/lists/${id}/move`, data),
+};
+
+export const timeTracking = {
+  getEntries: (params = {}) =>
+    api.get('/time-entries', { params }),
+  
+  getById: (id) =>
+    api.get(`/time-entries/${id}`),
+  
+  create: (data) =>
+    api.post('/time-entries', data),
+  
+  update: (id, data) =>
+    api.put(`/time-entries/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/time-entries/${id}`),
+  
+  start: (data) =>
+    api.post('/time-entries/start', data),
+  
+  stop: (id) =>
+    api.post(`/time-entries/${id}/stop`),
+  
+  getByUser: (userId, params = {}) =>
+    api.get(`/time-entries/user/${userId}`, { params }),
+  
+  getByTask: (taskId, params = {}) =>
+    api.get(`/time-entries/task/${taskId}`, { params }),
+};
+
+export const comments = {
+  getByEntity: (entityType, entityId, params = {}) =>
+    api.get(`/comments/${entityType}/${entityId}`, { params }),
+  
+  create: (data) =>
+    api.post('/comments', data),
+  
+  update: (id, data) =>
+    api.put(`/comments/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/comments/${id}`),
+  
+  reply: (parentId, data) =>
+    api.post(`/comments/${parentId}/reply`, data),
+};
+
+export const activities = {
+  getByProgram: (programId, params = {}) =>
+    api.get(`/activities/program/${programId}`, { params }),
+  
+  getByEntity: (entityType, entityId, params = {}) =>
+    api.get(`/activities/${entityType}/${entityId}`, { params }),
+  
+  getAll: (params = {}) =>
+    api.get('/activities', { params }),
+};
+
+export const attachments = {
+  upload: (entityType, entityId, file, onProgress) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', entityType);
+    formData.append('entityId', entityId);
+    
+    return api.post('/attachments', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: onProgress,
+    });
+  },
+  
+  getByEntity: (entityType, entityId) =>
+    api.get(`/attachments/${entityType}/${entityId}`),
+  
+  delete: (id) =>
+    api.delete(`/attachments/${id}`),
+  
+  download: (id) =>
+    api.get(`/attachments/${id}/download`, { responseType: 'blob' }),
+};
+
+export const customFields = {
+  getDefinitions: (entityType, programId = null) =>
+    api.get('/custom-fields/definitions', { 
+      params: { entityType, programId } 
+    }),
+  
+  createDefinition: (data) =>
+    api.post('/custom-fields/definitions', data),
+  
+  updateDefinition: (id, data) =>
+    api.put(`/custom-fields/definitions/${id}`, data),
+  
+  deleteDefinition: (id) =>
+    api.delete(`/custom-fields/definitions/${id}`),
+  
+  getValues: (entityType, entityId) =>
+    api.get(`/custom-fields/values/${entityType}/${entityId}`),
+  
+  updateValues: (entityType, entityId, values) =>
+    api.put(`/custom-fields/values/${entityType}/${entityId}`, { values }),
+};
+
+export const automation = {
+  getRules: (programId = null) =>
+    api.get('/automation/rules', { params: { programId } }),
+  
+  createRule: (data) =>
+    api.post('/automation/rules', data),
+  
+  updateRule: (id, data) =>
+    api.put(`/automation/rules/${id}`, data),
+  
+  deleteRule: (id) =>
+    api.delete(`/automation/rules/${id}`),
+  
+  toggleRule: (id, isActive) =>
+    api.put(`/automation/rules/${id}/toggle`, { isActive }),
+  
+  getLogs: (ruleId, params = {}) =>
+    api.get(`/automation/logs/${ruleId}`, { params }),
+};
+
+
 export default api;

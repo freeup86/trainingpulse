@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { ArrowLeft, Save, Calendar, Clock, AlertTriangle, Trash2, Package, CheckCircle } from 'lucide-react';
-import { courses, users, teams } from '../lib/api';
+import { courses, users, teams, programs, folders, lists } from '../lib/api';
+import { CourseCreateBreadcrumb } from './navigation/Breadcrumb';
 
 const MODALITIES = [
   { value: 'WBT', label: 'WBT (Web-Based Training)' },
@@ -45,7 +46,7 @@ function formatDateForAPI(dateString) {
   return date.toISOString();
 }
 
-export default function CourseForm({ courseId = null }) {
+export default function CourseForm({ courseId = null, defaultListId = null, hierarchyData = null, initialData = null }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const isEditing = Boolean(courseId);
@@ -61,7 +62,11 @@ export default function CourseForm({ courseId = null }) {
     dueDate: '',
     estimatedHours: '',
     estimatedDailyHours: '',
-    workflowTemplateId: 1 // Default workflow template
+    workflowTemplateId: 1, // Default workflow template
+    assignees: [],
+    programId: '',
+    folderId: '',
+    listId: defaultListId || ''
   });
 
   const [modalityInfo, setModalityInfo] = useState(null);
@@ -105,14 +110,100 @@ export default function CourseForm({ courseId = null }) {
     queryKey: ['users'],
     queryFn: async () => {
       const response = await users.getAll();
-      return response.data.data.users; // Extract users array
+      // Handle different possible response structures
+      return response.data?.data?.users || response.data?.users || response.data?.data || response.data || [];
     }
+  });
+
+  // Fetch programs
+  const { data: programsData } = useQuery({
+    queryKey: ['programs'],
+    queryFn: async () => {
+      const response = await programs.getAll();
+      return response.data?.data || response.data || [];
+    }
+  });
+
+  // Get initial list data from hierarchyData when defaultListId is provided
+  const initialListData = useMemo(() => {
+    if (!defaultListId || !hierarchyData?.lists || isEditing) {
+      return null;
+    }
+    
+    const currentList = hierarchyData.lists.find(list => list.id === defaultListId);
+    if (!currentList) {
+      return null;
+    }
+    
+    // Find the folder for this list
+    const currentFolder = hierarchyData.folders?.find(folder => folder.id === currentList.folder_id);
+    if (!currentFolder) {
+      return null;
+    }
+    
+    // Find the program for this folder
+    const currentProgram = hierarchyData.programs?.find(program => program.id === currentFolder.program_id);
+    if (!currentProgram) {
+      return null;
+    }
+    
+    return {
+      ...currentList,
+      folder: currentFolder,
+      program: currentProgram
+    };
+  }, [defaultListId, hierarchyData, isEditing]);
+
+  // Use hierarchyData when available, otherwise fetch folders
+  const foldersData = useMemo(() => {
+    if (hierarchyData?.folders && !isEditing) {
+      const programId = formData.programId || initialListData?.program?.id;
+      if (!programId) return [];
+      return hierarchyData.folders.filter(folder => folder.program_id === programId);
+    }
+    return null;
+  }, [hierarchyData?.folders, formData.programId, initialListData?.program?.id, isEditing]);
+
+  // Fallback folder query for when hierarchyData is not available or in editing mode
+  const { data: fetchedFoldersData } = useQuery({
+    queryKey: ['folders', formData.programId || courseData?.program_id],
+    queryFn: async () => {
+      const programId = formData.programId || courseData?.program_id;
+      if (!programId) return [];
+      const response = await folders.getAll({ programId });
+      const foldersList = response.data?.data || response.data || [];
+      return foldersList;
+    },
+    enabled: Boolean((formData.programId || courseData?.program_id) && (foldersData === null || isEditing))
+  });
+
+  // Use hierarchyData when available, otherwise fetch lists
+  const listsData = useMemo(() => {
+    if (hierarchyData?.lists && !isEditing) {
+      const folderId = formData.folderId || initialListData?.folder?.id;
+      if (!folderId) return [];
+      return hierarchyData.lists.filter(list => list.folder_id === folderId);
+    }
+    return null;
+  }, [hierarchyData?.lists, formData.folderId, initialListData?.folder?.id, isEditing]);
+
+  // Fallback lists query for when hierarchyData is not available or in editing mode
+  const { data: fetchedListsData } = useQuery({
+    queryKey: ['lists', formData.folderId || courseData?.folder_id],
+    queryFn: async () => {
+      const folderId = formData.folderId || courseData?.folder_id;
+      if (!folderId) return [];
+      const response = await lists.getAll({ folderId });
+      return response.data?.data || response.data || [];
+    },
+    enabled: Boolean((formData.folderId || courseData?.folder_id) && (listsData === null || isEditing))
   });
 
   // Populate form when editing
   useEffect(() => {
     if (courseData) {
       const course = courseData;
+      
       
       setFormData({
         title: course.title || '',
@@ -125,10 +216,49 @@ export default function CourseForm({ courseId = null }) {
         dueDate: course.due_date ? course.due_date.split('T')[0] : '',
         estimatedHours: course.estimated_hours || '',
         estimatedDailyHours: course.estimated_daily_hours || '',
-        workflowTemplateId: course.workflow_template_id || 1
+        workflowTemplateId: course.workflow_template_id || 1,
+        assignees: course.assignees || [],
+        programId: course.program_id ? String(course.program_id) : '',
+        folderId: course.folder_id ? String(course.folder_id) : '',
+        listId: course.list_id ? String(course.list_id) : ''
       });
     }
   }, [courseData]);
+
+  // Auto-populate program, folder, and list when defaultListId is provided
+  useEffect(() => {
+    if (defaultListId && initialListData && !isEditing && !initialData) {
+      setFormData(prev => ({
+        ...prev,
+        programId: initialListData.program.id || '',
+        folderId: initialListData.folder.id || '',
+        listId: defaultListId
+      }));
+    }
+  }, [defaultListId, initialListData, isEditing, initialData]);
+
+  // Populate form with duplicate data when provided
+  useEffect(() => {
+    if (initialData && !isEditing) {
+      setFormData({
+        title: initialData.title || '',
+        description: initialData.description || '',
+        modality: initialData.modality || '',
+        deliverables: initialData.deliverables?.map(d => d.id) || [],
+        priority: initialData.priority || 'medium',
+        ownerId: initialData.owner?.id || initialData.owner_id || '',
+        startDate: initialData.start_date ? initialData.start_date.split('T')[0] : '',
+        dueDate: initialData.due_date ? initialData.due_date.split('T')[0] : '',
+        estimatedHours: initialData.estimated_hours || '',
+        estimatedDailyHours: initialData.estimated_daily_hours || '',
+        workflowTemplateId: initialData.workflow_template_id || 1,
+        assignees: initialData.assignees || [],
+        programId: initialData.program_id ? String(initialData.program_id) : '',
+        folderId: initialData.folder_id ? String(initialData.folder_id) : '',
+        listId: initialData.list_id ? String(initialData.list_id) : defaultListId || ''
+      });
+    }
+  }, [initialData, isEditing, defaultListId]);
 
   // Create course mutation
   const createMutation = useMutation({
@@ -137,7 +267,13 @@ export default function CourseForm({ courseId = null }) {
       const tasksCreated = response.data.data.tasksCreated || 0;
       toast.success(`Course created successfully with ${tasksCreated} auto-generated phases!`);
       queryClient.invalidateQueries(['courses']);
-      navigate('/courses');
+      
+      // Navigate back to the appropriate list if we have a listId
+      if (formData.listId) {
+        navigate(`/lists/${formData.listId}/courses`);
+      } else {
+        navigate('/programs');
+      }
     },
     onError: (error) => {
       console.error('Course creation error:', error.response?.data);
@@ -156,7 +292,13 @@ export default function CourseForm({ courseId = null }) {
       toast.success('Course updated successfully!');
       queryClient.invalidateQueries(['courses']);
       queryClient.invalidateQueries(['course', courseId]);
-      navigate('/courses');
+      
+      // Navigate back to the appropriate list if we have a listId, otherwise go to course detail
+      if (formData.listId) {
+        navigate(`/lists/${formData.listId}/courses`);
+      } else {
+        navigate(`/courses/${courseId}`);
+      }
     },
     onError: (error) => {
       toast.error(error.response?.data?.error?.message || 'Failed to update course');
@@ -172,7 +314,13 @@ export default function CourseForm({ courseId = null }) {
       queryClient.invalidateQueries(['user-courses']);
       queryClient.invalidateQueries(['user-phase-assignments']);
       queryClient.invalidateQueries(['user-stats']);
-      navigate('/courses');
+      
+      // Navigate back to the appropriate list if we have a listId
+      if (formData.listId) {
+        navigate(`/lists/${formData.listId}/courses`);
+      } else {
+        navigate('/programs');
+      }
     },
     onError: (error) => {
       toast.error(error.response?.data?.error?.message || 'Failed to delete course');
@@ -180,10 +328,22 @@ export default function CourseForm({ courseId = null }) {
   });
 
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    setFormData(prev => {
+      const newData = {
+        ...prev,
+        [field]: value
+      };
+      
+      // Reset child selections when parent changes
+      if (field === 'programId') {
+        newData.folderId = '';
+        newData.listId = '';
+      } else if (field === 'folderId') {
+        newData.listId = '';
+      }
+      
+      return newData;
+    });
   };
 
   const handleModalityChange = (modality) => {
@@ -267,6 +427,11 @@ export default function CourseForm({ courseId = null }) {
       return;
     }
 
+    if (!formData.listId) {
+      toast.error('Please select a list for the course');
+      return;
+    }
+
     // All courses must have at least one deliverable selected
     if (formData.deliverables.length === 0) {
       toast.error('Please select at least one deliverable');
@@ -284,8 +449,13 @@ export default function CourseForm({ courseId = null }) {
       description: formData.description.trim(),
       modality: formData.modality,
       priority: formData.priority,
-      workflowTemplateId: formData.workflowTemplateId
+      listId: formData.listId
     };
+    
+    // Only include workflowTemplateId when creating a new course
+    if (!isEditing) {
+      submitData.workflowTemplateId = formData.workflowTemplateId;
+    }
 
 
     // Add ownerId if provided
@@ -310,8 +480,6 @@ export default function CourseForm({ courseId = null }) {
       submitData.estimatedDailyHours = parseFloat(formData.estimatedDailyHours);
     }
 
-    console.log('Submitting course data:', submitData);
-    
     if (isEditing) {
       updateMutation.mutate(submitData);
     } else {
@@ -345,15 +513,30 @@ export default function CourseForm({ courseId = null }) {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        {/* Breadcrumb */}
+        <CourseCreateBreadcrumb 
+          selectedProgram={programsData?.find(p => p.id === formData.programId)}
+          selectedFolder={(foldersData || fetchedFoldersData)?.find(f => f.id === formData.folderId)}
+          selectedList={(listsData || fetchedListsData)?.find(l => l.id === formData.listId)}
+          isEditing={isEditing}
+          courseTitle={isEditing ? (courseData?.title || formData.title) : null}
+        />
+        
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center mb-4">
             <button
-              onClick={() => navigate('/courses')}
+              onClick={() => {
+                if (formData.listId) {
+                  navigate(`/lists/${formData.listId}/courses`);
+                } else {
+                  navigate('/programs');
+                }
+              }}
               className="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             >
               <ArrowLeft className="h-4 w-4 mr-1" />
-              Back to Courses
+              Back to {formData.listId ? 'List' : 'Programs'}
             </button>
           </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
@@ -434,13 +617,83 @@ export default function CourseForm({ courseId = null }) {
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                 >
                   <option value="">Select a lead...</option>
-                  {(usersData || []).map(user => (
+                  {Array.isArray(usersData) ? usersData.map(user => (
                     <option key={user.id} value={user.id}>
                       {user.name} ({user.email})
                     </option>
-                  ))}
+                  )) : null}
                 </select>
               </div>
+
+              {/* Program Selection - Hidden when auto-populated from list context */}
+              {!defaultListId && (
+                <div>
+                  <label htmlFor="programId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Program *
+                  </label>
+                  <select
+                    id="programId"
+                    value={formData.programId}
+                    onChange={(e) => handleInputChange('programId', e.target.value)}
+                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    required
+                    disabled={isEditing}
+                  >
+                    <option value="">Select a program...</option>
+                    {Array.isArray(programsData) ? programsData.map(program => (
+                      <option key={program.id} value={String(program.id)}>
+                        {program.name} ({program.code})
+                      </option>
+                    )) : null}
+                  </select>
+                </div>
+              )}
+
+              {/* Folder Selection - Hidden when auto-populated from list context */}
+              {!defaultListId && formData.programId && (
+                <div>
+                  <label htmlFor="folderId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Folder *
+                  </label>
+                  <select
+                    id="folderId"
+                    value={formData.folderId || ''}
+                    onChange={(e) => handleInputChange('folderId', e.target.value)}
+                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    required
+                  >
+                    <option value="">Select a folder...</option>
+                    {Array.isArray(foldersData || fetchedFoldersData) ? (foldersData || fetchedFoldersData).map(folder => (
+                      <option key={folder.id} value={String(folder.id)}>
+                        {folder.name}
+                      </option>
+                    )) : null}
+                  </select>
+                </div>
+              )}
+
+              {/* List Selection - Hidden when auto-populated from list context */}
+              {!defaultListId && formData.folderId && (
+                <div>
+                  <label htmlFor="listId" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    List *
+                  </label>
+                  <select
+                    id="listId"
+                    value={formData.listId}
+                    onChange={(e) => handleInputChange('listId', e.target.value)}
+                    className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    required
+                  >
+                    <option value="">Select a list...</option>
+                    {Array.isArray(listsData || fetchedListsData) ? (listsData || fetchedListsData).map(list => (
+                      <option key={list.id} value={String(list.id)}>
+                        {list.name}
+                      </option>
+                    )) : null}
+                  </select>
+                </div>
+              )}
 
               {/* Modality Selection */}
               <div>
@@ -643,6 +896,8 @@ export default function CourseForm({ courseId = null }) {
             </div>
           </div>
 
+
+
           {/* Actions */}
           <div className="flex justify-between">
             <div>
@@ -661,7 +916,13 @@ export default function CourseForm({ courseId = null }) {
             <div className="flex space-x-3">
               <button
                 type="button"
-                onClick={() => navigate('/courses')}
+                onClick={() => {
+                  if (formData.listId) {
+                    navigate(`/lists/${formData.listId}/courses`);
+                  } else {
+                    navigate('/programs');
+                  }
+                }}
                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
               >
                 Cancel

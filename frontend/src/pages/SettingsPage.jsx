@@ -26,6 +26,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCompactMode } from '../contexts/CompactModeContext';
 import toast from 'react-hot-toast';
+import Breadcrumb from '../components/navigation/Breadcrumb';
 
 const SETTING_CATEGORIES = [
   { id: 'account', label: 'Account', icon: User },
@@ -148,6 +149,9 @@ function SettingsPage() {
 
   return (
     <div className="p-6">
+      {/* Breadcrumb */}
+      <Breadcrumb items={[{ label: 'Settings', href: '/settings' }]} />
+      
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between">

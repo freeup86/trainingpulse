@@ -10,6 +10,11 @@ import {
   FileSpreadsheet,
   Shield,
   ClipboardList,
+  Building,
+  MessageCircle,
+  Brain,
+  Grid3X3,
+  UserCheck,
   X
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth.jsx';
@@ -25,6 +30,12 @@ const navigation = [
     permissions: [] // Everyone can access dashboard
   },
   {
+    name: 'Programs',
+    href: '/programs',
+    icon: Building,
+    permissions: [] // Everyone can view programs/clients
+  },
+  {
     name: 'Courses',
     href: '/courses',
     icon: BookOpen,
@@ -36,12 +47,36 @@ const navigation = [
     icon: ClipboardList,
     permissions: ['courses.view'] // Same permission as courses since it shows course assignments
   },
-  {
-    name: 'Teams',
-    href: '/teams',
-    icon: Users,
-    permissions: ['teams.view']
-  },
+  // {
+  //   name: 'Resources',
+  //   href: '/resources',
+  //   icon: UserCheck,
+  //   permissions: ['resources.view']
+  // },
+  // {
+  //   name: 'Chat',
+  //   href: '/chat',
+  //   icon: MessageCircle,
+  //   permissions: ['chat.access']
+  // },
+  // {
+  //   name: 'AI Insights',
+  //   href: '/ai-insights',
+  //   icon: Brain,
+  //   permissions: ['ai.access']
+  // },
+  // {
+  //   name: 'Custom Dashboard',
+  //   href: '/custom-dashboard',
+  //   icon: Grid3X3,
+  //   permissions: ['dashboard.manage']
+  // },
+  // {
+  //   name: 'Features Showcase',
+  //   href: '/features',
+  //   icon: Grid3X3,
+  //   permissions: []
+  // },
   {
     name: 'Analytics',
     href: '/analytics',
@@ -49,7 +84,7 @@ const navigation = [
     permissions: ['analytics.view']
   },
   {
-    name: 'Bulk Operations',
+    name: 'Data Management',
     href: '/bulk',
     icon: FileSpreadsheet,
     permissions: ['bulk.execute']

@@ -1,7 +1,7 @@
 -- Migration: Create course phase archives table
 -- This table stores historical phase data when a course progresses to a new status
 
-CREATE TABLE course_phase_archives (
+CREATE TABLE IF NOT EXISTS course_phase_archives (
   id SERIAL PRIMARY KEY,
   course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
   course_status VARCHAR(50) NOT NULL, -- The course status during which these phases were completed
@@ -26,10 +26,10 @@ CREATE TABLE course_phase_archives (
 );
 
 -- Create indexes for performance
-CREATE INDEX idx_course_phase_archives_course_id ON course_phase_archives(course_id);
-CREATE INDEX idx_course_phase_archives_course_status ON course_phase_archives(course_status);
-CREATE INDEX idx_course_phase_archives_subtask_id ON course_phase_archives(subtask_id);
-CREATE INDEX idx_course_phase_archives_archived_at ON course_phase_archives(archived_at);
+CREATE INDEX IF NOT EXISTS idx_course_phase_archives_course_id ON course_phase_archives(course_id);
+CREATE INDEX IF NOT EXISTS idx_course_phase_archives_course_status ON course_phase_archives(course_status);
+CREATE INDEX IF NOT EXISTS idx_course_phase_archives_subtask_id ON course_phase_archives(subtask_id);
+CREATE INDEX IF NOT EXISTS idx_course_phase_archives_archived_at ON course_phase_archives(archived_at);
 
 -- Add a comment explaining the table
 COMMENT ON TABLE course_phase_archives IS 'Stores historical phase completion data when courses progress to new statuses, preserving all dates and progress from previous status periods';

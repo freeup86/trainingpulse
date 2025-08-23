@@ -3,10 +3,11 @@ const logger = require('../utils/logger');
 
 let pool;
 
-// For Aiven compatibility
-if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
-}
+// Determine if we need SSL based on the DATABASE_URL
+const needsSSL = process.env.DATABASE_URL && 
+  (process.env.DATABASE_URL.includes('sslmode=require') || 
+   process.env.DATABASE_URL.includes('aivencloud.com') ||
+   process.env.DATABASE_URL.includes('aiven'));
 
 const dbConfig = {
   connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/trainingpulse',
@@ -14,11 +15,15 @@ const dbConfig = {
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000, // Increased from 2s to 10s
   query_timeout: 30000, // 30 second query timeout
-  ssl: process.env.DATABASE_URL?.includes('sslmode=require') || process.env.DATABASE_URL?.includes('aivencloud.com') ? { 
-    rejectUnauthorized: false,
-    sslmode: 'require'
-  } : false
 };
+
+// Add SSL configuration if needed
+if (needsSSL) {
+  dbConfig.ssl = {
+    rejectUnauthorized: false,
+    require: true
+  };
+}
 
 async function connectDB() {
   try {

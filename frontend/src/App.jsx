@@ -13,7 +13,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import TeamsPage from './pages/TeamsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import WorkflowsPage from './pages/WorkflowsPage';
-import BulkOperationsPage from './pages/BulkOperationsPage';
+import DataManagementPage from './pages/DataManagementPage';
 import SettingsPage from './pages/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
 import AssignmentsPage from './pages/AssignmentsPage';
@@ -28,6 +28,15 @@ import TestWorkflowPage from './pages/TestWorkflowPage';
 import TestPage from './pages/TestPage';
 import MinimalPage from './pages/MinimalPage';
 import AdminPage from './pages/AdminPage';
+import ProgramsPage from './pages/ProgramsPage';
+import ProgramDetailPage from './pages/ProgramDetailPage';
+import ProgramSettingsPage from './pages/ProgramSettingsPage';
+// import ResourceManagementPage from './pages/ResourceManagementPage';
+// import ChatPage from './pages/ChatPage';
+// import CustomDashboardPage from './pages/CustomDashboardPage';
+// import AIInsightsPage from './pages/AIInsightsPage';
+import CoursesPageNew from './pages/CoursesPageNew';
+// import FeaturesShowcasePage from './pages/FeaturesShowcasePage';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -107,10 +116,16 @@ function App() {
                   >
                     <Route index element={<Navigate to="/dashboard" replace />} />
                     <Route path="dashboard" element={<DashboardPage />} />
-                    <Route path="courses" element={<CoursesPage />} />
+                    <Route path="courses" element={<Navigate to="/programs" replace />} />
+                    <Route path="courses-new" element={<CoursesPageNew />} />
                     <Route path="courses/create" element={<CreateCoursePage />} />
                     <Route path="courses/:id" element={<CourseDetailPage />} />
                     <Route path="courses/:id/edit" element={<EditCoursePage />} />
+                    <Route path="lists/:listId/courses" element={<CoursesPage />} />
+                    <Route path="lists/:listId/courses/create" element={<CreateCoursePage />} />
+                    <Route path="programs" element={<ProgramsPage />} />
+                    <Route path="programs/:id" element={<ProgramDetailPage />} />
+                    <Route path="programs/:id/settings" element={<ProgramSettingsPage />} />
                     <Route path="assignments" element={<AssignmentsPage />} />
                     <Route path="teams" element={<TeamsPage />} />
                     <Route path="teams/create" element={<CreateTeamPage />} />
@@ -120,8 +135,13 @@ function App() {
                     <Route path="workflows/create" element={<WorkflowCreatePage />} />
                     <Route path="workflows/:id/edit" element={<WorkflowCreatePage />} />
                     <Route path="workflows/test" element={<TestWorkflowPage />} />
-                    <Route path="bulk" element={<BulkOperationsPage />} />
+                    <Route path="bulk" element={<DataManagementPage />} />
                     <Route path="notifications" element={<NotificationsPage />} />
+                    {/* <Route path="resources" element={<ResourceManagementPage />} /> */}
+                    {/* <Route path="chat" element={<ChatPage />} /> */}
+                    {/* <Route path="custom-dashboard" element={<CustomDashboardPage />} /> */}
+                    {/* <Route path="ai-insights" element={<AIInsightsPage />} /> */}
+                    {/* <Route path="features" element={<FeaturesShowcasePage />} /> */}
                     <Route path="admin" element={<AdminPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                     <Route path="profile" element={<ProfilePage />} />

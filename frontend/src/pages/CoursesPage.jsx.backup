@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { 
   Search, 
@@ -13,6 +13,7 @@ import {
   CheckCircle,
   Circle,
   Pause,
+  PlayCircle,
   ChevronDown,
   ChevronUp,
   ChevronRight,
@@ -20,11 +21,17 @@ import {
   Edit,
   ArrowRight,
   Layers,
-  X
+  X,
+  List as ListIcon,
+  Copy,
+  MoreHorizontal,
+  Folder,
+  Building
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { courses, statuses } from '../lib/api';
+import { courses, statuses, phaseStatuses, users, modalityTasks, programs, folders, lists } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
+import Breadcrumb, { useBreadcrumbs } from '../components/navigation/Breadcrumb';
 
 // Independent status definitions (separate from workflow)
 const COURSE_STATUSES = {
@@ -61,6 +68,25 @@ const getStatusFromWorkflow = (workflowState) => {
   }
 };
 
+// Function to get course status information
+const getCourseStatus = (course, statusesData = null) => {
+  const courseStatus = course.status || 'inactive';
+  const statusesList = statusesData?.data || statusesData || [];
+  const statusInfo = statusesList.find(s => s.value === courseStatus) || 
+                    COURSE_STATUSES[courseStatus] || 
+                    COURSE_STATUSES['inactive'];
+  
+  return {
+    ...statusInfo,
+    icon: statusInfo.icon === 'CheckCircle' ? CheckCircle :
+          statusInfo.icon === 'Circle' ? Circle :
+          statusInfo.icon === 'Pause' ? Pause :
+          statusInfo.icon === 'X' ? X :
+          statusInfo.icon === 'AlertTriangle' ? AlertTriangle :
+          Circle
+  };
+};
+
 const WORKFLOW_STATES = {
   'draft': { icon: Circle, label: 'Draft', color: 'text-gray-500 dark:text-gray-400' },
   'planning': { icon: Circle, label: 'Planning', color: 'text-gray-500 dark:text-gray-400' },
@@ -95,10 +121,76 @@ const WORKFLOW_PROGRESSION = {
   'archived': [] // Terminal state
 };
 
-// Helper function to calculate progress based on subtask completion
-const calculateProgress = (subtasks) => {
+// Helper function to calculate progress based on phase completion percentages and modality weights
+const calculateProgress = (subtasks, phaseStatuses, modalityTasksData, courseModality) => {
   if (!subtasks || subtasks.length === 0) return 0;
-  const completedCount = subtasks.filter(st => st.status === 'completed').length;
+  
+  // If we have phase status data, use completion percentages
+  if (phaseStatuses && phaseStatuses.length > 0) {
+    // Try to use weighted calculation if modality tasks data is available
+    
+    if (modalityTasksData && courseModality) {
+      let modalityTasks = [];
+      
+      if (Array.isArray(modalityTasksData)) {
+        // If it's an array, filter by modality
+        modalityTasks = modalityTasksData.filter(mt => mt.modality === courseModality);
+      } else if (typeof modalityTasksData === 'object') {
+        // If it's an object keyed by modality, access directly
+        if (modalityTasksData[courseModality]) {
+          modalityTasks = modalityTasksData[courseModality];
+        } else {
+          // Try other patterns
+          modalityTasks = modalityTasksData.data?.[courseModality] ||
+                         Object.values(modalityTasksData).flat().filter(mt => mt?.modality === courseModality) ||
+                         [];
+        }
+      }
+      
+      // Ensure modalityTasks is always an array
+      if (!Array.isArray(modalityTasks)) {
+        modalityTasks = [];
+      }
+      
+      
+      if (modalityTasks.length > 0) {
+        let weightedProgress = 0;
+        let totalWeight = 0;
+        
+        subtasks.forEach(task => {
+          const statusConfig = phaseStatuses.find(s => s.value === task.status);
+          const completionPercentage = statusConfig?.completionPercentage || 0;
+          
+          // Find matching modality task by task_type
+          const modalityTask = modalityTasks.find(mt => 
+            mt.task_type?.toLowerCase() === task.title?.toLowerCase() ||
+            mt.title?.toLowerCase() === task.title?.toLowerCase() ||
+            mt.name?.toLowerCase() === task.title?.toLowerCase()
+          );
+          
+          const weight = modalityTask?.weight_percentage || (100 / subtasks.length); // Equal weight as fallback
+          
+          
+          weightedProgress += (completionPercentage * weight / 100);
+          totalWeight += weight;
+        });
+        
+        // Normalize to 100% if total weight isn't exactly 100
+        return totalWeight > 0 ? Math.round(weightedProgress * 100 / totalWeight) : 0;
+      }
+    }
+    
+    // Fallback to simple average if no modality weights available
+    const totalPercentage = subtasks.reduce((sum, task) => {
+      const statusConfig = phaseStatuses.find(s => s.value === task.status);
+      const completionPercentage = statusConfig?.completionPercentage || 0;
+      return sum + completionPercentage;
+    }, 0);
+    return Math.round(totalPercentage / subtasks.length);
+  }
+  
+  // Fallback to simple completion count
+  const completedCount = subtasks.filter(st => st.status === 'completed' || st.status === 'final_revision').length;
   return Math.round((completedCount / subtasks.length) * 100);
 };
 
@@ -107,16 +199,49 @@ function CoursesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { listId } = useParams(); // Get listId from URL if we're in a list context
+  
+  // Redirect to dashboard page if no listId is provided
+  useEffect(() => {
+    if (!listId) {
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+  }, [listId, navigate]);
+  
+  // Don't render anything if no listId
+  if (!listId) {
+    return null;
+  }
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [showCourseModal, setShowCourseModal] = useState(false);
   const [expandedCourses, setExpandedCourses] = useState(new Set());
-  const [groupBy, setGroupBy] = useState(''); // '' for no grouping, 'status' for grouping by status
+  const [groupBy, setGroupBy] = useState(() => {
+    // Initialize from localStorage, then check URL params
+    const saved = localStorage.getItem('coursesGroupBy');
+    return saved || '';
+  }); // '' for no grouping, 'status' for grouping by status
+  // Always use table view
+  const viewMode = 'table';
   const [filters, setFilters] = useState({
     priority: '',
     type: '',
     status: ''
   });
+  const [showDropdown, setShowDropdown] = useState(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+
+  // Function to calculate dropdown position
+  const calculateDropdownPosition = (buttonElement) => {
+    const rect = buttonElement.getBoundingClientRect();
+    const dropdownWidth = 192; // w-48 = 12rem = 192px
+    
+    return {
+      top: rect.top + window.scrollY,
+      left: rect.left - dropdownWidth - 8 // 8px spacing
+    };
+  };
 
   // Read URL parameters on component mount
   useEffect(() => {
@@ -125,6 +250,7 @@ function CoursesPage() {
     const urlType = searchParams.get('type') || '';
     const urlStatus = searchParams.get('status') || '';
     const urlFilter = searchParams.get('filter') || '';
+    const urlGroupBy = searchParams.get('groupBy') || '';
 
     // Handle special filter parameters
     let computedFilters = {
@@ -144,10 +270,50 @@ function CoursesPage() {
 
     setSearchTerm(urlSearch);
     setFilters(computedFilters);
+    
+    // Only update groupBy from URL if URL has a value, or if we're explicitly clearing it
+    // Don't let empty URL params override localStorage
+    if (urlGroupBy && urlGroupBy !== groupBy) {
+      // URL has a value and it's different from current state
+      setGroupBy(urlGroupBy);
+      localStorage.setItem('coursesGroupBy', urlGroupBy);
+    } else if (!urlGroupBy && groupBy) {
+      // URL is empty but we have a groupBy state - restore URL from localStorage/state
+      const params = new URLSearchParams(searchParams);
+      params.set('groupBy', groupBy);
+      setSearchParams(params, { replace: true });
+    }
   }, [searchParams]);
 
+  // Ensure URL reflects localStorage value on mount
+  useEffect(() => {
+    const savedGroupBy = localStorage.getItem('coursesGroupBy') || '';
+    const urlGroupBy = searchParams.get('groupBy') || '';
+    
+    // If localStorage has a value but URL doesn't, update URL
+    if (savedGroupBy && !urlGroupBy) {
+      const params = new URLSearchParams(searchParams);
+      params.set('groupBy', savedGroupBy);
+      setSearchParams(params, { replace: true });
+    }
+  }, []); // Only run on mount
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showDropdown && !event.target.closest('.relative')) {
+        setShowDropdown(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showDropdown]);
+
   const { data: coursesData, isLoading, error } = useQuery({
-    queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { 
+    queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, listId, { 
       priority: filters.priority, 
       type: filters.type 
       // Exclude status from query key since we filter on frontend
@@ -156,9 +322,11 @@ function CoursesPage() {
       const params = {
         priority: filters.priority || undefined,
         type: filters.type || undefined,
+        list_id: listId || undefined, // Filter by list if in list context
         // Don't send status to backend - we'll filter on frontend using derived status
         limit: 50
       };
+      
       
       // Admin users get all courses, other users get only their assigned courses
       return user?.role === 'admin' 
@@ -168,6 +336,91 @@ function CoursesPage() {
     enabled: !!user?.id
   });
 
+  // Fetch hierarchy data when searching (but not when we have listId since we get hierarchy from list API)
+  const shouldLoadHierarchy = Boolean(searchTerm.trim()) && !Boolean(listId);
+  
+  const { data: programsData, isLoading: programsLoading } = useQuery({
+    queryKey: ['programs'],
+    queryFn: async () => {
+      const response = await programs.getAll();
+      return response.data?.data || response.data || [];
+    },
+    enabled: shouldLoadHierarchy
+  });
+
+  const { data: foldersData, isLoading: foldersLoading } = useQuery({
+    queryKey: ['folders'],
+    queryFn: async () => {
+      const response = await folders.getAll();
+      return response.data?.data || response.data || [];
+    },
+    enabled: shouldLoadHierarchy
+  });
+
+  const { data: listsData, isLoading: listsLoading } = useQuery({
+    queryKey: ['lists'],
+    queryFn: async () => {
+      const response = await lists.getAll();
+      return response.data?.data || response.data || [];
+    },
+    enabled: shouldLoadHierarchy
+  });
+
+  // Fetch specific list data when we have a listId
+  const { data: specificListData, isLoading: specificListLoading } = useQuery({
+    queryKey: ['list', listId],
+    queryFn: async () => {
+      const response = await lists.getById(listId);
+      return response.data?.data || response.data;
+    },
+    enabled: !!listId
+  });
+
+  // Get current list data from specific fetch (contains hierarchy names already)
+  const currentListData = specificListData;
+
+  // Generate breadcrumb items
+  const { generateBreadcrumbs } = useBreadcrumbs();
+  const hierarchyDataLoading = specificListLoading;
+  
+  const breadcrumbItems = (() => {
+    if (listId) {
+      if (hierarchyDataLoading) {
+        // Data is still loading
+        return [{ label: 'Loading...', href: '#' }];
+      } else if (specificListData && specificListData.program_name && specificListData.folder_name) {
+        // We have list data with embedded hierarchy names from the backend
+        // Create pseudo objects to match the generateBreadcrumbs interface
+        const programData = { 
+          id: specificListData.program_id || 'unknown', 
+          name: specificListData.program_name 
+        };
+        const folderData = { 
+          id: specificListData.folder_id || 'unknown', 
+          name: specificListData.folder_name 
+        };
+        const listData = { 
+          id: specificListData.id, 
+          name: specificListData.name 
+        };
+        
+        const hierarchyItems = generateBreadcrumbs(programData, folderData, listData, null, 'list');
+        return [...hierarchyItems, { label: 'Courses', href: `/lists/${listId}/courses` }];
+      } else {
+        // We have listId but couldn't find the hierarchy data
+        console.log('Debug - Breadcrumb Data Missing:');
+        console.log('  listId:', listId);
+        console.log('  specificListData:', specificListData);
+        console.log('  specificListData.program_name:', specificListData?.program_name);
+        console.log('  specificListData.folder_name:', specificListData?.folder_name);
+        return [{ label: 'List Courses', href: `/lists/${listId}/courses` }];
+      }
+    } else {
+      // Default courses breadcrumb - this shouldn't happen since we redirect
+      return [{ label: 'Programs', href: '/programs' }];
+    }
+  })();
+
   // Fetch statuses for filtering and display
   const { data: statusesData } = useQuery({
     queryKey: ['statuses'],
@@ -175,6 +428,33 @@ function CoursesPage() {
       const response = await statuses.getAll();
       return response.data;
     }
+  });
+
+  // Fetch phase statuses for progress calculation
+  const { data: phaseStatusesData } = useQuery({
+    queryKey: ['phase-statuses'],
+    queryFn: async () => {
+      const response = await phaseStatuses.getAll();
+      return response.data.data;
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour - phase statuses change very rarely
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
+  });
+
+  // Fetch modality tasks for progress calculation
+  const { data: modalityTasksData, isLoading: modalityLoading } = useQuery({
+    queryKey: ['modality-tasks'],
+    queryFn: async () => {
+      const response = await modalityTasks.getAll();
+      // Handle different possible response structures
+      return response.data?.data || response.data || [];
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour - modality tasks change very rarely
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
   });
 
   const workflowTransitionMutation = useMutation({
@@ -201,6 +481,29 @@ function CoursesPage() {
       toast.error(errorMessage);
     }
   });
+  
+  // Duplicate course mutation
+  const duplicateCourseMutation = useMutation({
+    mutationFn: (courseId) => programs.duplicateCourse(courseId, { listId }),
+    onSuccess: (response) => {
+      queryClient.invalidateQueries(['courses']);
+      const newCourseId = response.data?.data?.id || response.data?.id;
+      toast.success('Course duplicated successfully');
+      if (newCourseId) {
+        navigate(`/courses/${newCourseId}/edit`);
+      }
+    },
+    onError: (error) => {
+      toast.error(error.response?.data?.message || 'Failed to duplicate course');
+    }
+  });
+  
+  const handleDuplicateCourse = (courseId) => {
+    console.log('Duplicating course:', courseId);
+    duplicateCourseMutation.mutate(courseId);
+  };
+
+
 
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({
@@ -218,8 +521,14 @@ function CoursesPage() {
       active: ''
     });
     setSearchTerm('');
-    // Clear URL parameters as well
-    setSearchParams({});
+    // Clear URL parameters but preserve groupBy
+    const params = new URLSearchParams(searchParams);
+    const currentGroupBy = params.get('groupBy');
+    params.clear();
+    if (currentGroupBy) {
+      params.set('groupBy', currentGroupBy);
+    }
+    setSearchParams(params);
   };
 
   const toggleCourseExpansion = (courseId) => {
@@ -243,11 +552,8 @@ function CoursesPage() {
   };
 
   const openCourseModal = (course) => {
-    console.log('Opening course modal for:', course.title);
-    console.log('Course data:', course);
     setSelectedCourse(course);
     setShowCourseModal(true);
-    console.log('Modal state should be true now');
   };
 
   const closeCourseModal = () => {
@@ -255,10 +561,6 @@ function CoursesPage() {
     setShowCourseModal(false);
   };
 
-  // Debug useEffect to track state changes
-  useEffect(() => {
-    console.log('State changed - showCourseModal:', showCourseModal, 'selectedCourse:', selectedCourse?.title);
-  }, [showCourseModal, selectedCourse]);
 
   if (isLoading) {
     return (
@@ -294,13 +596,67 @@ function CoursesPage() {
   let coursesList = coursesData?.data?.data?.courses || coursesData?.data?.courses || [];
   
   
+  
+  // Build hierarchy lookup for breadcrumbs and search
+  const hierarchyLookup = {};
+  if (shouldLoadHierarchy) {
+    // When we have full hierarchy data loaded
+    const allPrograms = Array.isArray(programsData) ? programsData : [];
+    const allFolders = Array.isArray(foldersData) ? foldersData : [];
+    const allLists = Array.isArray(listsData) ? listsData : [];
+    
+    coursesList.forEach(course => {
+      if (course.list_id) {
+        const list = allLists.find(l => l.id === course.list_id);
+        if (list) {
+          const folder = allFolders.find(f => f.id === list.folder_id);
+          if (folder) {
+            const program = allPrograms.find(p => p.id === folder.program_id);
+            if (program) {
+              hierarchyLookup[course.id] = {
+                program: program.name,
+                folder: folder.name,
+                list: list.name,
+                programId: program.id
+              };
+            }
+          }
+        }
+      }
+    });
+  } else if (listId && specificListData && specificListData.program_name && specificListData.folder_name) {
+    // When we're in a list context, build lookup for all courses in this list
+    coursesList.forEach(course => {
+      if (course.list_id === listId) {
+        hierarchyLookup[course.id] = {
+          program: specificListData.program_name,
+          folder: specificListData.folder_name,
+          list: specificListData.name,
+          programId: specificListData.program_id || 'unknown'
+        };
+      }
+    });
+  }
+
   // Apply client-side search filtering
   if (searchTerm.trim()) {
     const searchLower = searchTerm.toLowerCase();
-    coursesList = coursesList.filter(course => 
-      course.title?.toLowerCase().includes(searchLower) ||
-      course.description?.toLowerCase().includes(searchLower)
-    );
+    coursesList = coursesList.filter(course => {
+      // Search in course fields
+      const matchesCourse = 
+        course.title?.toLowerCase().includes(searchLower) ||
+        course.description?.toLowerCase().includes(searchLower);
+      
+      // Also search in hierarchy path
+      const hierarchy = hierarchyLookup[course.id];
+      const matchesHierarchy = hierarchy && (
+        hierarchy.program?.toLowerCase().includes(searchLower) ||
+        hierarchy.folder?.toLowerCase().includes(searchLower) ||
+        hierarchy.list?.toLowerCase().includes(searchLower)
+      );
+      
+      return matchesCourse || matchesHierarchy;
+    });
   }
   
   // Apply frontend filtering for special cases
@@ -329,41 +685,71 @@ function CoursesPage() {
   
   const hasActiveFilters = Object.values(filters).some(v => v) || searchTerm.trim();
 
-  // Group courses by status if groupBy is set
-  const groupedCourses = groupBy === 'status' ? (() => {
-    const groups = {};
-    const statusesList = statusesData?.data || statusesData || [];
+  // Group courses by status or hierarchy
+  const groupedCourses = (() => {
+    if (groupBy === 'status') {
+      const groups = {};
+      const statusesList = statusesData?.data || statusesData || [];
+      
+      coursesList.forEach(course => {
+        // Use the course's actual status field from the database
+        const courseStatus = course.status || 'inactive';
+        
+        // Find the status info from the database statuses
+        const statusInfo = statusesList.find(s => s.value === courseStatus);
+        const statusLabel = statusInfo ? statusInfo.label : courseStatus;
+        
+        if (!groups[statusLabel]) {
+          groups[statusLabel] = [];
+        }
+        groups[statusLabel].push(course);
+      });
+      
+      // Sort groups by status order_index from database
+      const sortedGroups = {};
+      statusesList
+        .sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+        .forEach(status => {
+          if (groups[status.label]) {
+            sortedGroups[status.label] = groups[status.label];
+          }
+        });
+      
+      // Add any remaining groups that might not have been in the statusesList
+      Object.keys(groups).forEach(statusLabel => {
+        if (!sortedGroups[statusLabel]) {
+          sortedGroups[statusLabel] = groups[statusLabel];
+        }
+      });
+      
+      return sortedGroups;
+    }
     
-    coursesList.forEach(course => {
-      // Use the course's actual status field from the database
-      const courseStatus = course.status || 'inactive';
-      
-      // Find the status info from the database statuses
-      const statusInfo = statusesList.find(s => s.value === courseStatus);
-      const statusLabel = statusInfo ? statusInfo.label : courseStatus;
-      
-      if (!groups[statusLabel]) {
-        groups[statusLabel] = [];
-      }
-      groups[statusLabel].push(course);
-    });
-    return groups;
-  })() : null;
+    return null;
+  })();
 
   return (
     <>
     <div className="p-6">
+      {/* Breadcrumb */}
+      <Breadcrumb items={breadcrumbItems} />
+      
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Courses</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              Courses
+            </h1>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Manage training courses and track their progress through the workflow
+              {listId 
+                ? `Manage courses in the ${specificListData?.name || 'selected'} list`
+                : 'Manage training courses and track their progress through the workflow'
+              }
             </p>
           </div>
           <button 
-            onClick={() => navigate('/courses/create')}
+            onClick={() => navigate(listId ? `/lists/${listId}/courses/create` : '/courses/create')}
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -455,15 +841,37 @@ function CoursesPage() {
           {/* Group by Status */}
           <div>
             <button
-              onClick={() => setGroupBy(groupBy === 'status' ? '' : 'status')}
-              className={`w-full inline-flex items-center justify-center px-3 py-2 border shadow-sm text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
-                groupBy === 'status'
+              onClick={() => {
+                // Cycle through: none -> status -> none
+                let newGroupBy = '';
+                if (groupBy === '') {
+                  newGroupBy = 'status';
+                } else {
+                  newGroupBy = '';
+                }
+                
+                setGroupBy(newGroupBy);
+                
+                // Save to localStorage
+                localStorage.setItem('coursesGroupBy', newGroupBy);
+                
+                // Update URL parameters
+                const params = new URLSearchParams(searchParams);
+                if (newGroupBy) {
+                  params.set('groupBy', newGroupBy);
+                } else {
+                  params.delete('groupBy');
+                }
+                setSearchParams(params);
+              }}
+              className={`inline-flex items-center justify-center px-3 py-2 border shadow-sm text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
+                groupBy
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30'
                   : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
               }`}
             >
               <Layers className="h-4 w-4 mr-2" />
-              Group by Status
+              {groupBy === 'status' ? 'Group by Status' : 'No Grouping'}
             </button>
           </div>
         </div>
@@ -525,7 +933,7 @@ function CoursesPage() {
             </p>
             {!hasActiveFilters && (
               <button 
-                onClick={() => navigate('/courses/create')}
+                onClick={() => navigate(listId ? `/lists/${listId}/courses/create` : '/courses/create')}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -544,8 +952,9 @@ function CoursesPage() {
                   {statusLabel} ({statusCourses.length})
                 </h3>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              {(
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
@@ -558,13 +967,13 @@ function CoursesPage() {
                         Progress
                       </th>
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                        Start Date
+                      </th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                         Due Date
                       </th>
                       <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Assigned
-                      </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                        Updated
+                        Lead
                       </th>
                       <th scope="col" className="relative px-6 py-3">
                         <span className="sr-only">Actions</span>
@@ -588,11 +997,10 @@ function CoursesPage() {
                                         Circle;
                       
                       const isExpanded = expandedCourses.has(course.id);
-                      const progressPercentage = course.completion_percentage || 0;
                       
                       return (
                         <React.Fragment key={course.id}>
-                          <tr className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                          <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center">
                                 <button
@@ -618,6 +1026,18 @@ function CoursesPage() {
                                   >
                                     {course.title}
                                   </button>
+                                  {!listId && hierarchyLookup[course.id] && (
+                                    <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                      <Building className="h-3 w-3" />
+                                      <span>{hierarchyLookup[course.id].program}</span>
+                                      <ChevronRight className="h-3 w-3" />
+                                      <Folder className="h-3 w-3" />
+                                      <span>{hierarchyLookup[course.id].folder}</span>
+                                      <ChevronRight className="h-3 w-3" />
+                                      <ListIcon className="h-3 w-3" />
+                                      <span>{hierarchyLookup[course.id].list}</span>
+                                    </div>
+                                  )}
                                   {course.description && (
                                     <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">
                                       {course.description}
@@ -637,22 +1057,22 @@ function CoursesPage() {
 
                             {/* Progress Column */}
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="w-32">
-                                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                                  <span>{progressPercentage}%</span>
+                              <CourseProgress 
+                                courseId={course.id} 
+                                fallbackPercentage={course.completion_percentage || 0} 
+                              />
+                            </td>
+
+                            {/* Start Date Column */}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                              {(course.startDate || course.start_date) ? (
+                                <div className="flex items-center">
+                                  <Calendar className="h-4 w-4 mr-1 text-gray-400" />
+                                  <span>{formatDate(course.startDate || course.start_date)}</span>
                                 </div>
-                                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                  <div 
-                                    className={`h-2 rounded-full transition-all duration-300 ${
-                                      progressPercentage === 100 ? 'bg-green-500' :
-                                      progressPercentage >= 75 ? 'bg-blue-500' :
-                                      progressPercentage >= 50 ? 'bg-yellow-500' :
-                                      progressPercentage >= 25 ? 'bg-orange-500' : 'bg-red-500'
-                                    }`}
-                                    style={{ width: `${progressPercentage}%` }}
-                                  ></div>
-                                </div>
-                              </div>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
                             </td>
 
                             {/* Due Date Column */}
@@ -667,47 +1087,81 @@ function CoursesPage() {
                               )}
                             </td>
 
-                            {/* Assigned Column */}
+                            {/* Lead Column */}
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                              {course.assignments && course.assignments.length > 0 ? (
+                              {course.owner ? (
                                 <div className="flex items-center">
                                   <Users className="h-4 w-4 mr-1 text-gray-400" />
-                                  <span>{course.assignments.length}</span>
+                                  <span>{course.owner.name}</span>
                                 </div>
                               ) : (
-                                <span className="text-gray-400">0</span>
+                                <span className="text-gray-400">—</span>
                               )}
-                            </td>
-
-                            {/* Updated Column */}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                              <div className="flex items-center">
-                                <Clock className="h-4 w-4 mr-1 text-gray-400" />
-                                <span>{formatDate(course.updatedAt || course.updated_at)}</span>
-                              </div>
                             </td>
 
                             {/* Actions Column */}
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <div className="flex items-center justify-end space-x-2">
-                                <button 
+                              <div className="relative">
+                                <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    navigate(`/courses/${course.id}`);
+                                    if (showDropdown === course.id) {
+                                      setShowDropdown(null);
+                                    } else {
+                                      const position = calculateDropdownPosition(e.currentTarget);
+                                      setDropdownPosition(position);
+                                      setShowDropdown(course.id);
+                                    }
                                   }}
-                                  className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                  title="More actions"
                                 >
-                                  View
+                                  <MoreHorizontal className="h-5 w-5" />
                                 </button>
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    navigate(`/courses/${course.id}/edit`);
-                                  }}
-                                  className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                                >
-                                  Edit
-                                </button>
+                                
+                                {showDropdown === course.id && (
+                                  <div 
+                                    className="fixed z-50 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700"
+                                    style={{
+                                      top: `${dropdownPosition.top}px`,
+                                      left: `${dropdownPosition.left}px`
+                                    }}
+                                  >
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/courses/${course.id}`);
+                                        setShowDropdown(null);
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                    >
+                                      <ArrowRight className="h-4 w-4" />
+                                      <span>View Details</span>
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/courses/${course.id}/edit`);
+                                        setShowDropdown(null);
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                      <span>Edit Course</span>
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDuplicateCourse(course.id);
+                                        setShowDropdown(null);
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                      <span>Duplicate Course</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -715,7 +1169,7 @@ function CoursesPage() {
                             <tr className="bg-gray-50 dark:bg-gray-900">
                               <td colSpan="7" className="p-0">
                                 <div className="border-t border-gray-200 dark:border-gray-700">
-                                  <CourseSubtasks courseId={course.id} />
+                                  <CoursePhases courseId={course.id} />
                                 </div>
                               </td>
                             </tr>
@@ -725,12 +1179,13 @@ function CoursesPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
       ) : (
-        // Regular ungrouped view
+        // Table view
         <div className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-md">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -746,13 +1201,13 @@ function CoursesPage() {
                     Progress
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Start Date
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                     Due Date
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Assigned
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                    Updated
+                    Lead
                   </th>
                   <th scope="col" className="relative px-6 py-3">
                     <span className="sr-only">Actions</span>
@@ -776,11 +1231,10 @@ function CoursesPage() {
                                     Circle;
                   
                   const isExpanded = expandedCourses.has(course.id);
-                  const progressPercentage = course.completion_percentage || 0;
                   
                   return (
                     <React.Fragment key={course.id}>
-                      <tr className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                      <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
                             <button
@@ -806,6 +1260,18 @@ function CoursesPage() {
                               >
                                 {course.title}
                               </button>
+                              {!listId && hierarchyLookup[course.id] && (
+                                <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  <Building className="h-3 w-3" />
+                                  <span>{hierarchyLookup[course.id].program}</span>
+                                  <ChevronRight className="h-3 w-3" />
+                                  <Folder className="h-3 w-3" />
+                                  <span>{hierarchyLookup[course.id].folder}</span>
+                                  <ChevronRight className="h-3 w-3" />
+                                  <ListIcon className="h-3 w-3" />
+                                  <span>{hierarchyLookup[course.id].list}</span>
+                                </div>
+                              )}
                               {course.description && (
                                 <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">
                                   {course.description}
@@ -825,22 +1291,22 @@ function CoursesPage() {
 
                         {/* Progress Column */}
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="w-32">
-                            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                              <span>{progressPercentage}%</span>
+                          <CourseProgress 
+                            courseId={course.id} 
+                            fallbackPercentage={course.completion_percentage || 0} 
+                          />
+                        </td>
+
+                        {/* Start Date Column */}
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                          {(course.startDate || course.start_date) ? (
+                            <div className="flex items-center">
+                              <Calendar className="h-4 w-4 mr-1 text-gray-400" />
+                              <span>{formatDate(course.startDate || course.start_date)}</span>
                             </div>
-                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                              <div 
-                                className={`h-2 rounded-full transition-all duration-300 ${
-                                  progressPercentage === 100 ? 'bg-green-500' :
-                                  progressPercentage >= 75 ? 'bg-blue-500' :
-                                  progressPercentage >= 50 ? 'bg-yellow-500' :
-                                  progressPercentage >= 25 ? 'bg-orange-500' : 'bg-red-500'
-                                }`}
-                                style={{ width: `${progressPercentage}%` }}
-                              ></div>
-                            </div>
-                          </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
                         </td>
 
                         {/* Due Date Column */}
@@ -855,30 +1321,207 @@ function CoursesPage() {
                           )}
                         </td>
 
-                        {/* Assigned Column */}
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          {course.assignments && course.assignments.length > 0 ? (
-                            <div className="flex items-center">
-                              <Users className="h-4 w-4 mr-1 text-gray-400" />
-                              <span>{course.assignments.length}</span>
-                            </div>
-                          ) : (
-                            <span className="text-gray-400">0</span>
-                          )}
-                        </td>
-
-                        {/* Updated Column */}
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          <div className="flex items-center">
-                            <Clock className="h-4 w-4 mr-1 text-gray-400" />
-                            <span>{formatDate(course.updatedAt || course.updated_at)}</span>
-                          </div>
-                        </td>
-
                         {/* Actions Column */}
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                          <div className="relative">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (showDropdown === course.id) {
+                                  setShowDropdown(null);
+                                } else {
+                                  const position = calculateDropdownPosition(e.currentTarget);
+                                  setDropdownPosition(position);
+                                  setShowDropdown(course.id);
+                                }
+                              }}
+                              className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                              title="More actions"
+                            >
+                              <MoreHorizontal className="h-5 w-5" />
+                            </button>
+                            
+                            {showDropdown === course.id && (
+                              <div 
+                                className="fixed z-50 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700"
+                                style={{
+                                  top: `${dropdownPosition.top}px`,
+                                  left: `${dropdownPosition.left}px`
+                                }}
+                              >
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/courses/${course.id}`);
+                                    setShowDropdown(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                >
+                                  <ArrowRight className="h-4 w-4" />
+                                  <span>View Details</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/courses/${course.id}/edit`);
+                                    setShowDropdown(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                  <span>Edit Course</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDuplicateCourse(course.id);
+                                    setShowDropdown(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                >
+                                  <Copy className="h-4 w-4" />
+                                  <span>Duplicate Course</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-gray-50 dark:bg-gray-900">
+                          <td colSpan="7" className="p-0">
+                            <div className="border-t border-gray-200 dark:border-gray-700">
+                              <CoursePhases courseId={course.id} />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        // Table view for non-grouped courses
+        <div className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-md">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-700">
+                <tr>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Course
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Progress
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Start Date
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Due Date
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                    Lead
+                  </th>
+                  <th scope="col" className="relative px-6 py-3">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                {coursesList.map((course) => {
+                  const courseStatus = course.status || 'inactive';
+                  const statusesList = statusesData?.data || statusesData || [];
+                  const statusInfo = statusesList.find(s => s.value === courseStatus) || 
+                                    COURSE_STATUSES[courseStatus] || 
+                                    COURSE_STATUSES['inactive'];
+                  
+                  const StatusIcon = statusInfo.icon === 'CheckCircle' ? CheckCircle :
+                                    statusInfo.icon === 'Circle' ? Circle :
+                                    statusInfo.icon === 'Pause' ? Pause :
+                                    statusInfo.icon === 'X' ? X :
+                                    statusInfo.icon === 'AlertTriangle' ? AlertTriangle :
+                                    Circle;
+                  
+                  const isExpanded = expandedCourses.has(course.id);
+                  
+                  return (
+                    <React.Fragment key={course.id}>
+                      <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCourseExpansion(course.id);
+                              }}
+                              className="mr-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="h-5 w-5" />
+                              ) : (
+                                <ChevronRight className="h-5 w-5" />
+                              )}
+                            </button>
+                            <div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openCourseModal(course);
+                                }}
+                                className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left"
+                              >
+                                {course.title}
+                              </button>
+                              {!listId && hierarchyLookup[course.id] && (
+                                <div className="flex items-center space-x-1 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                  <Building className="h-3 w-3" />
+                                  <span>{hierarchyLookup[course.id].program}</span>
+                                  <ChevronRight className="h-3 w-3" />
+                                  <Folder className="h-3 w-3" />
+                                  <span>{hierarchyLookup[course.id].folder}</span>
+                                  <ChevronRight className="h-3 w-3" />
+                                  <ListIcon className="h-3 w-3" />
+                                  <span>{hierarchyLookup[course.id].list}</span>
+                                </div>
+                              )}
+                              {course.description && (
+                                <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">
+                                  {course.description}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <StatusIcon className={`h-4 w-4 mr-2 ${statusInfo.color}`} />
+                            <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <CourseProgress course={course} />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                          {course.start_date ? formatDate(course.start_date) : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                          {course.due_date ? formatDate(course.due_date) : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                          {course.owner ? course.owner.name : '—'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <div className="flex items-center justify-end space-x-2">
-                            <button 
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 navigate(`/courses/${course.id}`);
@@ -887,12 +1530,12 @@ function CoursesPage() {
                             >
                               View
                             </button>
-                            <button 
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 navigate(`/courses/${course.id}/edit`);
                               }}
-                              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                              className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300"
                             >
                               Edit
                             </button>
@@ -903,7 +1546,7 @@ function CoursesPage() {
                         <tr className="bg-gray-50 dark:bg-gray-900">
                           <td colSpan="7" className="p-0">
                             <div className="border-t border-gray-200 dark:border-gray-700">
-                              <CourseSubtasks courseId={course.id} />
+                              <CoursePhases courseId={course.id} />
                             </div>
                           </td>
                         </tr>
@@ -915,10 +1558,10 @@ function CoursesPage() {
             </table>
           </div>
         </div>
-      )}
+      )
     </div>
 
-    {/* Course Details Modal - Outside main container */}
+    {/* Course Details Modal */}
     {showCourseModal && selectedCourse && (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -947,7 +1590,7 @@ function CoursesPage() {
                 <div>
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</h3>
                   <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {getCourseStatus(selectedCourse)?.label || 'Unknown'}
+                    {getCourseStatus(selectedCourse, statusesData)?.label || 'Unknown'}
                   </p>
                 </div>
                 <div>
@@ -957,9 +1600,15 @@ function CoursesPage() {
                   </p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Type</h3>
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Modality</h3>
                   <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {selectedCourse.type?.replace('_', ' ') || 'Not set'}
+                    {selectedCourse.modality || 'Not set'}
+                  </p>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Lead</h3>
+                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                    {selectedCourse.owner ? selectedCourse.owner.name : 'Not assigned'}
                   </p>
                 </div>
                 <div>
@@ -998,12 +1647,117 @@ function CoursesPage() {
   );
 }
 
-// Subtasks component  
-function CourseSubtasks({ courseId }) {
+// Progress component that fetches course data to calculate accurate progress
+function CourseProgress({ courseId, fallbackPercentage = 0 }) {
+  const { data: courseData, isLoading: courseLoading, error: courseError } = useQuery({
+    queryKey: ['course', courseId],
+    queryFn: () => courses.getById(courseId),
+    staleTime: 5 * 60 * 1000 // 5 minutes
+  });
+  
+  const { data: phaseStatusesData, isLoading: statusLoading, error: statusError } = useQuery({
+    queryKey: ['phase-statuses'],
+    queryFn: async () => {
+      const response = await phaseStatuses.getAll();
+      return response.data.data;
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours  
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
+  });
+
+  const { data: modalityTasksData, isLoading: modalityLoading } = useQuery({
+    queryKey: ['modality-tasks'],
+    queryFn: async () => {
+      const response = await modalityTasks.getAll();
+      // Handle different possible response structures
+      return response.data?.data || response.data || [];
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour - modality tasks change very rarely
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
+  });
+
+  
+  const course = courseData?.data?.data || courseData?.data || {};
+  const subtasks = course.subtasks || [];
+  
+  const progressPercentage = subtasks.length > 0 && phaseStatusesData 
+    ? calculateProgress(subtasks, phaseStatusesData, modalityTasksData, course.modality) 
+    : fallbackPercentage;
+  
+  // Show loading state
+  if (courseLoading || statusLoading || modalityLoading) {
+    return (
+      <div className="w-32">
+        <div className="animate-pulse bg-gray-300 dark:bg-gray-600 h-2 rounded-full"></div>
+      </div>
+    );
+  }
+  
+  // Show error state
+  if (courseError || statusError) {
+    return (
+      <div className="w-32">
+        <span className="text-xs text-red-500">Error</span>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="w-32">
+      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+        <span>{progressPercentage}%</span>
+      </div>
+      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+        <div 
+          className={`h-2 rounded-full transition-all duration-300 ${
+            progressPercentage === 100 ? 'bg-green-500' :
+            progressPercentage >= 75 ? 'bg-blue-500' :
+            progressPercentage >= 50 ? 'bg-yellow-500' :
+            progressPercentage >= 25 ? 'bg-orange-500' : 'bg-red-500'
+          }`}
+          style={{ width: `${progressPercentage}%` }}
+        ></div>
+      </div>
+    </div>
+  );
+}
+
+// Phases component  
+function CoursePhases({ courseId }) {
   const queryClient = useQueryClient();
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [tempStatus, setTempStatus] = useState({});
+  const [editingDate, setEditingDate] = useState(null); // For tracking which date is being edited
+  const [tempDateValue, setTempDateValue] = useState(''); // For storing temporary date input
+  const [editingAssignmentId, setEditingAssignmentId] = useState(null);
+  const [tempAssignment, setTempAssignment] = useState({});
 
+
+  // Fetch phase statuses from database
+  const { data: phaseStatusesData } = useQuery({
+    queryKey: ['phase-statuses'],
+    queryFn: async () => {
+      const response = await phaseStatuses.getAll();
+      return response.data.data; // Extract the actual array from {success: true, data: [...]}
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    refetchOnWindowFocus: false,
+    refetchOnMount: false
+  });
+
+  // Fetch users for assignment
+  const { data: usersData } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const response = await users.getAll();
+      return response.data.data.users; // Extract users array
+    }
+  });
 
   // Close editing when clicking outside or pressing Escape
   useEffect(() => {
@@ -1011,13 +1765,35 @@ function CourseSubtasks({ courseId }) {
       if (e.key === 'Escape') {
         setEditingTaskId(null);
         setTempStatus({});
+        setEditingDate(null);
+        setTempDateValue('');
+        setEditingAssignmentId(null);
+        setTempAssignment({});
       }
     };
 
     const handleClickOutside = (e) => {
-      if (editingTaskId && !e.target.closest('.subtask-status-select')) {
+      if (editingTaskId && !e.target.closest('.phase-status-select')) {
         setEditingTaskId(null);
         setTempStatus({});
+      }
+      // Only close date editing if clicking outside the date editing area
+      if (editingDate && 
+          !e.target.closest('input[type="date"]') && 
+          !e.target.closest('[title="Click to edit date"]') &&
+          !e.target.closest('.text-green-600') &&
+          !e.target.closest('.text-gray-600')) {
+        setEditingDate(null);
+        setTempDateValue('');
+      }
+      // Close assignment editing if clicking outside the assignment area
+      if (editingAssignmentId && 
+          !e.target.closest('input[type="checkbox"]') &&
+          !e.target.closest('label') &&
+          !e.target.closest('button') &&
+          !e.target.closest('.bg-white.dark\\:bg-gray-700')) {
+        setEditingAssignmentId(null);
+        setTempAssignment({});
       }
     };
 
@@ -1028,7 +1804,7 @@ function CourseSubtasks({ courseId }) {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('click', handleClickOutside);
     };
-  }, [editingTaskId]);
+  }, [editingTaskId, editingDate, editingAssignmentId]);
   
   const { data: courseData, isLoading } = useQuery({
     queryKey: ['course', courseId],
@@ -1040,15 +1816,17 @@ function CourseSubtasks({ courseId }) {
     mutationFn: ({ subtaskId, updateData }) => 
       courses.updateSubtask(courseId, subtaskId, updateData),
     onSuccess: (data, variables) => {
+      // Only close status editing if we're updating status
+      if (variables.updateData.status !== undefined) {
+        setEditingTaskId(null);
+        toast.success('Phase status updated successfully');
+      }
+      
+      // Invalidate queries immediately but don't clear tempStatus yet
       queryClient.invalidateQueries(['course', courseId]);
       queryClient.invalidateQueries(['courses']);
-      setEditingTaskId(null);
-      setTempStatus(prev => {
-        const newStatus = { ...prev };
-        delete newStatus[variables.subtaskId];
-        return newStatus;
-      });
-      toast.success('Subtask status updated successfully');
+      
+      // Assignment updates are handled in the specific callback
     },
     onError: (error, variables) => {
       // Revert temp status on error
@@ -1057,18 +1835,74 @@ function CourseSubtasks({ courseId }) {
         delete newStatus[variables.subtaskId];
         return newStatus;
       });
-      console.error('Subtask update error:', error.response?.data);
-      toast.error(error.response?.data?.message || error.response?.data?.error || 'Failed to update subtask status');
+      console.error('Phase update error:', error.response?.data);
+      const errorMessage = error.response?.data?.error?.message || 
+                          error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          error.message || 
+                          'Failed to update phase status';
+      toast.error(typeof errorMessage === 'string' ? errorMessage : 'Failed to update phase status');
     }
   });
+
+  const updatePhaseHistoryMutation = useMutation({
+    mutationFn: ({ subtaskId, historyId, dateData }) => 
+      courses.updatePhaseStatusHistory(courseId, subtaskId, historyId, dateData),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['course', courseId]);
+      queryClient.invalidateQueries(['courses']);
+      setEditingDate(null);
+      setTempDateValue('');
+      toast.success('Phase date updated successfully');
+    },
+    onError: (error) => {
+      console.error('Phase date update error:', error.response?.data);
+      const errorMessage = error.response?.data?.error?.message || 
+                          error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          error.message || 
+                          'Failed to update phase date';
+      toast.error(typeof errorMessage === 'string' ? errorMessage : 'Failed to update phase date');
+      setEditingDate(null);
+      setTempDateValue('');
+    }
+  });
+
+  const handleDateEdit = (dateKey, currentValue) => {
+    setEditingDate(dateKey);
+    // Format date for input (YYYY-MM-DD)
+    if (currentValue) {
+      const date = new Date(currentValue);
+      setTempDateValue(date.toISOString().split('T')[0]);
+    } else {
+      setTempDateValue('');
+    }
+  };
+
+  const handleDateSave = (subtaskId, historyId, dateField) => {
+    if (tempDateValue === '') {
+      // Clear the date
+      const dateData = { [dateField]: null };
+      updatePhaseHistoryMutation.mutate({ subtaskId, historyId, dateData });
+    } else {
+      // Set the new date
+      const dateData = { [dateField]: new Date(tempDateValue).toISOString() };
+      updatePhaseHistoryMutation.mutate({ subtaskId, historyId, dateData });
+    }
+  };
+
+  const handleDateCancel = () => {
+    setEditingDate(null);
+    setTempDateValue('');
+  };
 
   const handleStatusUpdate = (subtaskId, newStatus) => {
     // Convert to string to handle numeric IDs
     const subtaskIdStr = String(subtaskId);
     
-    // Don't update if it's a temporary ID (subtask without real ID)
+    // Don't update if it's a temporary ID (phase without real ID)
     if (subtaskIdStr.startsWith('temp-')) {
-      toast.error('Cannot update subtask status: subtask not properly saved');
+      toast.error('Cannot update phase status: phase not properly saved');
       setEditingTaskId(null);
       return;
     }
@@ -1080,21 +1914,116 @@ function CourseSubtasks({ courseId }) {
     });
     
     if (!currentTask) {
-      toast.error('Could not find subtask data');
+      toast.error('Could not find phase data');
       return;
     }
 
-    // Don't close editing until the update is complete
+    const currentStatus = currentTask.status;
+    
+    // Check if changing from any status with dates to No Status
+    const statusesWithDates = [
+      'alpha_draft', 'alpha_review', 
+      'beta_revision', 'beta_review', 
+      'final_revision', 'final_signoff_sent', 'final_signoff_received'
+    ];
+    const isChangingToNoStatus = newStatus === '';
+    const currentHasDates = statusesWithDates.includes(currentStatus);
+    
+    if (isChangingToNoStatus && currentHasDates) {
+      // Show confirmation dialog
+      const confirmed = window.confirm(
+        `Warning: Changing from "${currentStatus.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}" to "No Status" will clear ALL phase dates including:\n\n• All start dates (Alpha Draft, Alpha Review, Beta Revision, Beta Review, Final, Final Signoff Sent, Final Signoff Received)\n• All end dates (where applicable)\n• All completion dates\n• Basic task dates (start, finish, completed)\n\nThis action cannot be undone. Do you want to continue?`
+      );
+      
+      if (!confirmed) {
+        // Reset the temp status and editing state
+        setTempStatus(prev => {
+          const newStatus = { ...prev };
+          delete newStatus[subtaskId];
+          return newStatus;
+        });
+        setEditingTaskId(null);
+        return;
+      }
+    }
+
+    // Proceed with the update
     updateSubtaskMutation.mutate({
       subtaskId: subtaskId, // Use original ID (might be number)
       updateData: { 
         title: currentTask.title, // Include required field
-        status: newStatus 
+        status: newStatus,
+        isBlocking: currentTask.is_blocking || false,
+        weight: currentTask.weight || 1,
+        orderIndex: currentTask.order_index || currentTask.orderIndex || 0
       }
     });
   };
 
+  // Assignment handling functions
+  const handleAssignmentClick = (subtaskId, currentAssignedUserIds) => {
+    setEditingAssignmentId(subtaskId);
+    setTempAssignment({ [subtaskId]: currentAssignedUserIds || [] });
+  };
+
+  const handleAssignmentToggle = (subtaskId, userId) => {
+    const currentAssignments = tempAssignment[subtaskId] || [];
+    const isAssigned = currentAssignments.includes(userId);
+    
+    let newAssignments;
+    if (isAssigned) {
+      newAssignments = currentAssignments.filter(id => id !== userId);
+    } else {
+      newAssignments = [...currentAssignments, userId];
+    }
+    
+    setTempAssignment({ [subtaskId]: newAssignments });
+  };
+
+  const handleAssignmentConfirm = (subtaskId) => {
+    const newAssignedUserIds = tempAssignment[subtaskId] || [];
+    updateSubtaskMutation.mutate({
+      subtaskId,
+      updateData: { assignedUserIds: newAssignedUserIds.map(id => parseInt(id)) }
+    }, {
+      onSuccess: () => {
+        setEditingAssignmentId(null);
+        setTempAssignment({});
+        toast.success('Assignments updated successfully');
+      },
+      onError: (error) => {
+        console.error('Assignment update failed:', error);
+        toast.error('Failed to update assignments');
+      }
+    });
+  };
+
+  const handleAssignmentCancel = () => {
+    setEditingAssignmentId(null);
+    setTempAssignment({});
+  };
+
   const subtasks = courseData?.data?.data?.subtasks || [];
+
+  // Auto-clear tempStatus when server data matches what we expect
+  React.useEffect(() => {
+    if (Object.keys(tempStatus).length === 0) return;
+    
+    const updatedTempStatus = { ...tempStatus };
+    let hasChanges = false;
+    
+    subtasks?.forEach(task => {
+      const taskId = task.id || task.subtask_id || task.subtaskId;
+      if (tempStatus[taskId] && task.status === tempStatus[taskId]) {
+        delete updatedTempStatus[taskId];
+        hasChanges = true;
+      }
+    });
+    
+    if (hasChanges) {
+      setTempStatus(updatedTempStatus);
+    }
+  }, [subtasks, tempStatus]);
 
   if (isLoading) {
     return (
@@ -1111,325 +2040,400 @@ function CourseSubtasks({ courseId }) {
       <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
         <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
           <ListTodo className="h-4 w-4 mr-2" />
-          <span>No subtasks defined</span>
+          <span>No phases defined</span>
         </div>
       </div>
     );
   }
 
-  const statusOptions = [
-    { value: 'pending', label: 'Pending', color: 'text-gray-500 dark:text-gray-400' },
-    { value: 'in_progress', label: 'In Progress', color: 'text-blue-500 dark:text-blue-400' },
-    { value: 'completed', label: 'Completed', color: 'text-green-500 dark:text-green-400' },
-    { value: 'on_hold', label: 'On Hold', color: 'text-yellow-500 dark:text-yellow-400' }
-  ];
+  const statusOptions = phaseStatusesData ? 
+    [
+      // Add empty status option first
+      { value: '', label: 'No Status', color: 'text-gray-500 dark:text-gray-400' },
+      ...phaseStatusesData
+        .filter(status => status.isActive)
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map(status => ({
+          value: status.value,
+          label: status.label,
+          color: `${status.color} ${status.darkColor || ''}`
+        }))
+    ]
+    : [
+      // Fallback options
+      { value: '', label: 'No Status', color: 'text-gray-500 dark:text-gray-400' },
+      { value: 'alpha_review', label: 'Alpha Review', color: 'text-blue-500 dark:text-blue-400' },
+      { value: 'beta_review', label: 'Beta Review', color: 'text-orange-500 dark:text-orange-400' },
+      { value: 'final_revision', label: 'Final (Gold)', color: 'text-yellow-600 dark:text-yellow-500' },
+      { value: 'final_signoff_received', label: 'Final Signoff Received', color: 'text-green-600 dark:text-green-400' }
+    ];
 
   return (
-    <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700">
-      <div className="space-y-2">
-        <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+    <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 overflow-x-auto">
+      <div className="space-y-2 min-w-full">
+        <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
           <ListTodo className="h-4 w-4 mr-2" />
-          <span>Subtasks ({subtasks.length})</span>
+          <span>Phases of Development ({subtasks.length})</span>
+        </div>
+        
+        {/* Column Headers */}
+        <div className="ml-6 mb-2">
+          <div className="flex text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+            <div className="w-48">Phase</div>
+            <div className="w-28 ml-2">Status</div>
+            <div className="w-40 ml-2">Assignees</div>
+            <div className="w-32 ml-4">Alpha Start/End</div>
+            <div className="w-32 ml-4">Beta Start/End</div>
+            <div className="w-32 ml-4">Final Start/End</div>
+            <div className="w-32 ml-4">Signoff Date</div>
+          </div>
         </div>
         {subtasks.map((task, index) => {
           // Check for different possible ID field names
           const taskId = task.id || task.subtask_id || task.subtaskId || `temp-${index}`;
+          
+          
           const currentTaskStatus = tempStatus[taskId] || task.status;
           const currentStatus = statusOptions.find(opt => opt.value === currentTaskStatus) || statusOptions[0];
-          const StatusIcon = {
-            'pending': Circle,
-            'in_progress': Clock,
-            'completed': CheckCircle,
-            'on_hold': Pause
-          }[currentTaskStatus] || Circle;
+          
+          // Get icon from database phase status or fallback to PlayCircle
+          const statusConfig = phaseStatusesData?.find(s => s.value === currentTaskStatus);
+          const StatusIcon = statusConfig?.icon ? (
+            statusConfig.icon === 'PlayCircle' ? PlayCircle :
+            statusConfig.icon === 'AlertTriangle' ? AlertTriangle :
+            statusConfig.icon === 'CheckCircle' ? CheckCircle :
+            statusConfig.icon === 'Circle' ? Circle :
+            statusConfig.icon === 'Pause' ? Pause :
+            statusConfig.icon === 'Edit' ? Edit :
+            PlayCircle
+          ) : PlayCircle;
 
           const isEditing = editingTaskId === taskId;
           const isUpdating = updateSubtaskMutation.isLoading && updateSubtaskMutation.variables?.subtaskId === taskId;
           const canEdit = !!(task.id || task.subtask_id || task.subtaskId); // Only allow editing if subtask has a real ID
 
           return (
-            <div key={task.id || index} className="group flex items-start space-x-3 ml-6 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
-              {isUpdating ? (
-                <div className="animate-spin rounded-full h-4 w-4 mt-0.5 border-b-2 border-blue-600"></div>
-              ) : (
-                <StatusIcon className={`h-4 w-4 mt-0.5 ${currentStatus.color}`} />
-              )}
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-gray-900 dark:text-white">{task.title}</span>
-                    {canEdit ? (
-                      <div className="relative group">
-                        <select
-                          value={currentTaskStatus}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            const newStatus = e.target.value;
-                            // Update temp status immediately
-                            setTempStatus(prev => ({
+            <div key={task.id || index} className="group ml-6 py-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
+              <div className="flex items-center">
+                {/* Phase Icon and Title Column */}
+                <div className="w-48 flex items-center space-x-2">
+                  {isUpdating ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 flex-shrink-0"></div>
+                  ) : (
+                    <StatusIcon className={`h-4 w-4 ${currentStatus.color} flex-shrink-0`} />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{task.title}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      ({statusConfig?.completionPercentage || 0}% complete)
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Status Dropdown Column */}
+                <div className="w-28 ml-2">
+                  {canEdit ? (
+                    <div className="relative group">
+                      <select
+                        value={currentTaskStatus}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          const newStatus = e.target.value;
+                          // Prevent double execution by checking if status is already changing
+                          if (currentTaskStatus === newStatus) {
+                            return;
+                          }
+                          
+                          // Update temp status immediately
+                          setTempStatus(prev => {
+                            // Don't update if already set to this value
+                            if (prev[taskId] === newStatus) {
+                              return prev;
+                            }
+                            return {
                               ...prev,
                               [taskId]: newStatus
-                            }));
-                            // Then trigger the API update
-                            handleStatusUpdate(taskId, newStatus);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          onFocus={() => {
-                            setEditingTaskId(taskId);
-                            // Initialize temp status with current status when starting edit
-                            setTempStatus(prev => ({
-                              ...prev,
-                              [taskId]: currentTaskStatus
-                            }));
-                          }}
-                          onBlur={() => {
-                            setTimeout(() => {
-                              setEditingTaskId(null);
-                            }, 200);
-                          }}
-                          className={`text-xs px-2 py-1 rounded border cursor-pointer font-medium appearance-none bg-transparent pr-6 ${
-                            isEditing 
-                              ? 'border-solid border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500' 
-                              : `border-dashed border-gray-300 dark:border-gray-600 hover:border-solid hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 transition-all ${currentStatus.color}`
-                          }`}
-                          disabled={updateSubtaskMutation.isLoading}
-                          title="Click to change status"
-                        >
-                          {statusOptions.map(option => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className={`absolute right-1 top-1/2 transform -translate-y-1/2 h-3 w-3 pointer-events-none transition-opacity ${
-                          isEditing ? 'opacity-100' : 'opacity-50 group-hover:opacity-100'
-                        }`} />
+                            };
+                          });
+                          
+                          // Then trigger the API update
+                          handleStatusUpdate(taskId, newStatus);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onFocus={() => {
+                          setEditingTaskId(taskId);
+                          // Initialize temp status with current status when starting edit
+                          setTempStatus(prev => ({
+                            ...prev,
+                            [taskId]: currentTaskStatus
+                          }));
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => {
+                            setEditingTaskId(null);
+                          }, 200);
+                        }}
+                        className={`phase-status-select text-xs px-1 py-1 rounded border cursor-pointer font-medium appearance-none pr-5 w-full ${
+                          isEditing 
+                            ? 'border-solid border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500' 
+                            : `border-dashed border-gray-300 dark:border-gray-600 hover:border-solid hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 transition-all ${currentStatus.color} bg-white dark:bg-gray-800`
+                        }`}
+                        disabled={updateSubtaskMutation.isLoading}
+                        title="Click to change status"
+                      >
+                        {statusOptions.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className={`absolute right-0.5 top-1/2 transform -translate-y-1/2 h-3 w-3 pointer-events-none transition-opacity ${
+                        isEditing ? 'opacity-100' : 'opacity-50 group-hover:opacity-100'
+                      }`} />
+                    </div>
+                  ) : (
+                    <span className={`text-xs px-1 py-1 rounded ${currentStatus.color} bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600`}>
+                      {currentStatus.label}
+                    </span>
+                  )}
+                </div>
+                
+                {/* Assignees Column */}
+                <div className="w-40 ml-2 text-xs">
+                  {editingAssignmentId === taskId ? (
+                    <div className="relative">
+                      <div className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded p-2 shadow-lg z-50">
+                        <div className="max-h-32 overflow-y-auto min-w-36 mb-2">
+                          {(usersData || []).map(user => {
+                            const isSelected = (tempAssignment[taskId] || []).includes(user.id);
+                            return (
+                              <label key={user.id} className="flex items-center space-x-2 text-xs hover:bg-gray-50 dark:hover:bg-gray-600 p-1 rounded cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    handleAssignmentToggle(taskId, user.id);
+                                  }}
+                                  className="h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                />
+                                <span className="text-gray-900 dark:text-white truncate">{user.name}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <div className="flex justify-end space-x-1 pt-1 border-t border-gray-200 dark:border-gray-600">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleAssignmentConfirm(taskId);
+                            }}
+                            disabled={updateSubtaskMutation.isLoading}
+                            className="flex items-center justify-center px-2 py-1 text-xs font-medium rounded text-green-600 bg-green-100 hover:bg-green-200 dark:text-green-400 dark:bg-green-900/20 dark:hover:bg-green-900/30 disabled:opacity-50 cursor-pointer"
+                            title="Save assignments"
+                          >
+                            <CheckCircle className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleAssignmentCancel();
+                            }}
+                            disabled={updateSubtaskMutation.isLoading}
+                            className="flex items-center justify-center px-2 py-1 text-xs font-medium rounded text-gray-600 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-900/20 dark:hover:bg-gray-900/30 disabled:opacity-50 cursor-pointer"
+                            title="Cancel editing"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
                       </div>
-                    ) : (
-                      <span className={`text-xs px-2 py-1 ${currentStatus.color}`}>
-                        {currentStatus.label}
-                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAssignmentClick(taskId, (task.assignedUsers || []).map(u => u.id));
+                      }}
+                      className="w-full text-left hover:bg-gray-100 dark:hover:bg-gray-700 p-1 rounded transition-colors"
+                      title="Click to edit assignees"
+                    >
+                      {task.assignedUsers && task.assignedUsers.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {task.assignedUsers.slice(0, 2).map((user, userIndex) => (
+                            <div
+                              key={user.id}
+                              className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                              title={user.name}
+                            >
+                              <Users className="h-2.5 w-2.5 mr-1" />
+                              <span className="truncate max-w-16">{user.name.split(' ')[0]}</span>
+                            </div>
+                          ))}
+                          {task.assignedUsers.length > 2 && (
+                            <div
+                              className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                              title={`${task.assignedUsers.length - 2} more: ${task.assignedUsers.slice(2).map(u => u.name).join(', ')}`}
+                            >
+                              +{task.assignedUsers.length - 2}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 dark:text-gray-500 italic">Unassigned</span>
+                      )}
+                    </button>
+                  )}
+                </div>
+                
+                {/* Alpha Start/End Column */}
+                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
+                  <div className="space-y-1">
+                    {/* Alpha Draft */}
+                    {(task.alpha_draft_start_date || task.alpha_draft_end_date) && (
+                      <div className="text-xs text-blue-600 dark:text-blue-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Draft: {task.alpha_draft_start_date ? formatDate(task.alpha_draft_start_date) : '—'}</span>
+                        </div>
+                        {task.alpha_draft_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.alpha_draft_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Alpha Review */}
+                    {(task.alpha_review_start_date || task.alpha_review_end_date) && (
+                      <div className="text-xs text-green-600 dark:text-green-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Review: {task.alpha_review_start_date ? formatDate(task.alpha_review_start_date) : '—'}</span>
+                        </div>
+                        {task.alpha_review_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.alpha_review_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show dash if no alpha dates */}
+                    {!task.alpha_draft_start_date && !task.alpha_draft_end_date && !task.alpha_review_start_date && !task.alpha_review_end_date && (
+                      <span className="text-gray-400">—</span>
                     )}
                   </div>
                 </div>
-                {task.description && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    {task.description}
-                  </p>
-                )}
+                
+                {/* Beta Start/End Column */}
+                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
+                  <div className="space-y-1">
+                    {/* Beta Revision */}
+                    {(task.beta_revision_start_date || task.beta_revision_end_date) && (
+                      <div className="text-xs text-orange-600 dark:text-orange-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Revision: {task.beta_revision_start_date ? formatDate(task.beta_revision_start_date) : '—'}</span>
+                        </div>
+                        {task.beta_revision_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.beta_revision_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Beta Review */}
+                    {(task.beta_review_start_date || task.beta_review_end_date) && (
+                      <div className="text-xs text-purple-600 dark:text-purple-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Review: {task.beta_review_start_date ? formatDate(task.beta_review_start_date) : '—'}</span>
+                        </div>
+                        {task.beta_review_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.beta_review_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show dash if no beta dates */}
+                    {!task.beta_revision_start_date && !task.beta_revision_end_date && !task.beta_review_start_date && !task.beta_review_end_date && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Final Start/End Column */}
+                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
+                  <div className="space-y-1">
+                    {/* Final Revision */}
+                    {(task.final_revision_start_date || task.final_revision_end_date) && (
+                      <div className="text-xs text-yellow-600 dark:text-yellow-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Final: {task.final_revision_start_date ? formatDate(task.final_revision_start_date) : '—'}</span>
+                        </div>
+                        {task.final_revision_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.final_revision_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show dash if no final dates */}
+                    {!task.final_revision_start_date && !task.final_revision_end_date && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Signoff Dates Column */}
+                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
+                  <div className="space-y-1">
+                    {/* Final Signoff Sent */}
+                    {(task.final_signoff_sent_start_date || task.final_signoff_sent_end_date) && (
+                      <div className="text-xs text-blue-600 dark:text-blue-400">
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Sent: {task.final_signoff_sent_start_date ? formatDate(task.final_signoff_sent_start_date) : '—'}</span>
+                        </div>
+                        {task.final_signoff_sent_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.final_signoff_sent_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Final Signoff Received */}
+                    {task.final_signoff_received_start_date && (
+                      <div className="text-xs text-green-600 dark:text-green-400">
+                        <div className="flex items-center space-x-1">
+                          <CheckCircle className="h-3 w-3" />
+                          <span>Received: {formatDate(task.final_signoff_received_start_date)}</span>
+                        </div>
+                      </div>
+                    )}
+                    {/* Show dash if no signoff dates */}
+                    {!task.final_signoff_sent_start_date && !task.final_signoff_sent_end_date && !task.final_signoff_received_start_date && (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
+      
     </div>
-
-    {/* Course Details Modal - Outside main container */}
-    {console.log('Modal render check - showCourseModal:', showCourseModal, 'selectedCourse:', selectedCourse)}
-    
-    {/* Test Modal - always shows if showCourseModal is true */}
-    {showCourseModal && (
-      <div className="fixed inset-0 bg-red-500 bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white p-6 rounded-lg">
-          <h2>TEST MODAL - Modal is working!</h2>
-          <p>Course: {selectedCourse?.title || 'No course selected'}</p>
-          <button onClick={closeCourseModal} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">
-            Close
-          </button>
-        </div>
-      </div>
-    )}
-    
-    {false && (showCourseModal && selectedCourse) && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                Course Details
-              </h2>
-              <button
-                onClick={closeCourseModal}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-
-            {/* Modal Content */}
-            <div className="p-6 space-y-6">
-              {/* Course Title */}
-              <div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                  {selectedCourse.title}
-                </h3>
-                {selectedCourse.description && (
-                  <p className="text-gray-600 dark:text-gray-400">
-                    {selectedCourse.description}
-                  </p>
-                )}
-              </div>
-
-              {/* Course Info Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Status */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Status
-                  </label>
-                  <div className="flex items-center space-x-2">
-                    {(() => {
-                      const courseStatus = selectedCourse.status || 'inactive';
-                      const statusesList = statusesData?.data || statusesData || [];
-                      const statusInfo = statusesList.find(s => s.value === courseStatus) || 
-                                        COURSE_STATUSES[courseStatus] || 
-                                        COURSE_STATUSES['inactive'];
-                      
-                      const StatusIcon = statusInfo.icon === 'CheckCircle' ? CheckCircle :
-                                        statusInfo.icon === 'Circle' ? Circle :
-                                        statusInfo.icon === 'Pause' ? Pause :
-                                        statusInfo.icon === 'X' ? X :
-                                        statusInfo.icon === 'AlertTriangle' ? AlertTriangle :
-                                        Circle;
-                      
-                      return (
-                        <>
-                          <StatusIcon className={`h-4 w-4 ${statusInfo.color}`} />
-                          <span className={`text-sm ${statusInfo.color}`}>
-                            {statusInfo.label}
-                          </span>
-                        </>
-                      );
-                    })()}
-                  </div>
-                </div>
-
-                {/* Priority */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Priority
-                  </label>
-                  <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(selectedCourse.priority)}`}>
-                    {selectedCourse.priority || 'medium'}
-                  </span>
-                </div>
-
-                {/* Type */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Type
-                  </label>
-                  <span className="text-sm text-gray-900 dark:text-white">
-                    {selectedCourse.type || 'standard'}
-                  </span>
-                </div>
-
-                {/* Progress */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Progress
-                  </label>
-                  <div className="flex items-center space-x-2">
-                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                      <div 
-                        className="bg-blue-600 h-2 rounded-full" 
-                        style={{ width: `${selectedCourse.completion_percentage || 0}%` }}
-                      ></div>
-                    </div>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      {selectedCourse.completion_percentage || 0}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Dates */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {(selectedCourse.start_date || selectedCourse.startDate) && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Start Date
-                    </label>
-                    <div className="flex items-center space-x-2">
-                      <Calendar className="h-4 w-4 text-gray-500" />
-                      <span className="text-sm text-gray-900 dark:text-white">
-                        {formatDate(selectedCourse.start_date || selectedCourse.startDate)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-
-                {(selectedCourse.due_date || selectedCourse.dueDate) && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Due Date
-                    </label>
-                    <div className="flex items-center space-x-2">
-                      <Calendar className="h-4 w-4 text-gray-500" />
-                      <span className="text-sm text-gray-900 dark:text-white">
-                        {formatDate(selectedCourse.due_date || selectedCourse.dueDate)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Estimated Hours */}
-              {(selectedCourse.estimated_hours || selectedCourse.estimated_daily_hours) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {selectedCourse.estimated_hours && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Estimated Hours
-                      </label>
-                      <div className="flex items-center space-x-2">
-                        <Clock className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm text-gray-900 dark:text-white">
-                          {selectedCourse.estimated_hours} hours
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedCourse.estimated_daily_hours && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Daily Hours
-                      </label>
-                      <div className="flex items-center space-x-2">
-                        <Clock className="h-4 w-4 text-gray-500" />
-                        <span className="text-sm text-gray-900 dark:text-white">
-                          {selectedCourse.estimated_daily_hours} hours/day
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex items-center justify-end space-x-3 p-6 border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={closeCourseModal}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => {
-                  navigate(`/courses/${selectedCourse.id}`);
-                  closeCourseModal();
-                }}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-              >
-                View Full Details
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
   );
 }
 

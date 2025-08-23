@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { 
   Search, 
@@ -21,11 +21,14 @@ import {
   Edit,
   ArrowRight,
   Layers,
-  X
+  X,
+  MoreHorizontal,
+  Copy
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { courses, statuses, phaseStatuses, users, modalityTasks } from '../lib/api';
+import { courses, statuses, phaseStatuses, users, modalityTasks, programs, lists } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
+import Breadcrumb, { useBreadcrumbs } from '../components/navigation/Breadcrumb';
 
 // Independent status definitions (separate from workflow)
 const COURSE_STATUSES = {
@@ -97,7 +100,13 @@ const WORKFLOW_STATES = {
 };
 
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
-const TYPES = ['instructor_led', 'elearning', 'blended', 'microlearning', 'certification'];
+const MODALITIES = [
+  { value: 'WBT', label: 'WBT (Web-Based Training)' },
+  { value: 'ILT/VLT', label: 'ILT/VLT (Instructor-Led/Virtual-Led Training)' },
+  { value: 'Micro Learning', label: 'Micro Learning' },
+  { value: 'SIMS', label: 'SIMS (Simulations)' },
+  { value: 'DAP', label: 'DAP (Digital Adoption Platform)' }
+];
 
 // Define workflow progression paths
 const WORKFLOW_PROGRESSION = {
@@ -197,6 +206,10 @@ function CoursesPage() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [showCourseModal, setShowCourseModal] = useState(false);
   const [expandedCourses, setExpandedCourses] = useState(new Set());
+  const [expandedStatusGroups, setExpandedStatusGroups] = useState(() => {
+    // Start with all common status groups expanded
+    return new Set(['PREDEVELOPMENT', 'DEVELOPMENT', 'PRODUCTION', 'ARCHIVED', 'ON HOLD']);
+  });
   const [groupBy, setGroupBy] = useState(() => {
     // Initialize from localStorage, then check URL params
     const saved = localStorage.getItem('coursesGroupBy');
@@ -204,9 +217,53 @@ function CoursesPage() {
   }); // '' for no grouping, 'status' for grouping by status
   const [filters, setFilters] = useState({
     priority: '',
-    type: '',
+    modality: '',
     status: ''
   });
+  const [showDropdown, setShowDropdown] = useState(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+
+  // Function to calculate dropdown position
+  const calculateDropdownPosition = (buttonElement) => {
+    const rect = buttonElement.getBoundingClientRect();
+    const dropdownWidth = 192; // w-48 = 12rem = 192px
+    
+    return {
+      top: rect.top + window.scrollY,
+      left: rect.left - dropdownWidth - 8 // 8px spacing
+    };
+  };
+
+  // Handle course duplication - navigate to create page with pre-filled data
+  const handleDuplicateCourse = async (courseId) => {
+    try {
+      // Fetch the course data
+      const response = await courses.getById(courseId);
+      const courseData = response.data?.data || response.data;
+      
+      // Prepare the course data for duplication
+      const duplicateData = {
+        ...courseData,
+        title: `${courseData.title} (copy)`,
+        id: undefined, // Remove ID so it creates a new course
+        created_at: undefined,
+        updated_at: undefined,
+        completed_at: undefined,
+        completion_percentage: 0,
+        status: 'draft'
+      };
+      
+      // Navigate to create page with the course data in state
+      if (listId) {
+        navigate(`/lists/${listId}/courses/create`, { state: { duplicateData } });
+      } else {
+        navigate('/courses/create', { state: { duplicateData } });
+      }
+    } catch (error) {
+      console.error('Error fetching course for duplication:', error);
+      toast.error('Failed to prepare course for duplication');
+    }
+  };
 
   // Read URL parameters on component mount
   useEffect(() => {
@@ -263,16 +320,36 @@ function CoursesPage() {
     }
   }, []); // Only run on mount
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showDropdown && !event.target.closest('.relative')) {
+        setShowDropdown(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showDropdown]);
+
+
+
+  const { listId } = useParams();
+
   const { data: coursesData, isLoading, error } = useQuery({
     queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { 
       priority: filters.priority, 
-      type: filters.type 
+      modality: filters.modality,
+      list_id: listId
       // Exclude status from query key since we filter on frontend
     }],
     queryFn: () => {
       const params = {
         priority: filters.priority || undefined,
-        type: filters.type || undefined,
+        modality: filters.modality || undefined,
+        list_id: listId || undefined, // Filter by list if in list context
         // Don't send status to backend - we'll filter on frontend using derived status
         limit: 50
       };
@@ -293,6 +370,71 @@ function CoursesPage() {
       return response.data;
     }
   });
+
+  // Fetch hierarchy data when searching (programs only, for hierarchy lookup)
+  const shouldLoadPrograms = Boolean(searchTerm.trim());
+  
+  const { data: programsData, isLoading: programsLoading } = useQuery({
+    queryKey: ['programs'],
+    queryFn: async () => {
+      const response = await programs.getAll();
+      return response.data?.data || response.data || [];
+    },
+    enabled: shouldLoadPrograms
+  });
+
+  // Fetch specific list data when we have a listId
+  const { data: specificListData, isLoading: specificListLoading } = useQuery({
+    queryKey: ['list', listId],
+    queryFn: async () => {
+      const response = await lists.getById(listId);
+      return response.data?.data || response.data || {};
+    },
+    enabled: !!listId
+  });
+
+  // Get current list data from specific fetch (contains hierarchy names already)
+  const currentListData = specificListData;
+
+  // Generate breadcrumb items
+  const { generateBreadcrumbs } = useBreadcrumbs();
+  
+  const breadcrumbItems = (() => {
+    if (listId) {
+      if (specificListLoading) {
+        // Data is still loading
+        return [{ label: 'Loading...', href: '#' }];
+      } 
+      
+      // Use embedded hierarchy names from specific list data
+      if (specificListData && specificListData.program_name && specificListData.folder_name) {
+        const programData = { 
+          id: specificListData.program_id || 'unknown', 
+          name: specificListData.program_name 
+        };
+        const folderData = { 
+          id: specificListData.folder_id || 'unknown', 
+          name: specificListData.folder_name 
+        };
+        const listData = { 
+          id: specificListData.id || listId, 
+          name: specificListData.name 
+        };
+        
+        const hierarchyItems = generateBreadcrumbs(programData, folderData, listData, null, 'list');
+        return [...hierarchyItems, { label: 'Courses', href: `/lists/${listId}/courses` }];
+      }
+      
+      // Final fallback
+      return [
+        { label: 'Programs', href: '/programs' },
+        { label: 'List Courses', href: `/lists/${listId}/courses` }
+      ];
+    } else {
+      // Default courses breadcrumb - this shouldn't happen since we redirect
+      return [{ label: 'Programs', href: '/programs' }];
+    }
+  })();
 
   // Fetch phase statuses for progress calculation
   const { data: phaseStatusesData } = useQuery({
@@ -344,7 +486,7 @@ function CoursesPage() {
   const clearFilters = () => {
     setFilters({
       priority: '',
-      type: '',
+      modality: '',
       status: '',
       overdue: '',
       active: ''
@@ -424,14 +566,43 @@ function CoursesPage() {
   // Handle different data structures from getAll() vs getByUser()
   let coursesList = coursesData?.data?.data?.courses || coursesData?.data?.courses || [];
   
+  // Build hierarchy lookup for search
+  const hierarchyLookup = {};
+  
+  if (listId && specificListData && specificListData.program_name && specificListData.folder_name) {
+    // When we're in a list context, build lookup for all courses in this list
+    coursesList.forEach(course => {
+      if (course.list_id === listId) {
+        hierarchyLookup[course.id] = {
+          program: specificListData.program_name,
+          folder: specificListData.folder_name,
+          list: specificListData.name,
+          program_id: specificListData.program_id,
+          folder_id: specificListData.folder_id,
+          list_id: specificListData.id
+        };
+      }
+    });
+  }
   
   // Apply client-side search filtering
   if (searchTerm.trim()) {
     const searchLower = searchTerm.toLowerCase();
-    coursesList = coursesList.filter(course => 
-      course.title?.toLowerCase().includes(searchLower) ||
-      course.description?.toLowerCase().includes(searchLower)
-    );
+    coursesList = coursesList.filter(course => {
+      const matchesCourse = 
+        course.title?.toLowerCase().includes(searchLower) ||
+        course.description?.toLowerCase().includes(searchLower);
+      
+      // Also search in hierarchy path
+      const hierarchy = hierarchyLookup[course.id];
+      const matchesHierarchy = hierarchy && (
+        hierarchy.program?.toLowerCase().includes(searchLower) ||
+        hierarchy.folder?.toLowerCase().includes(searchLower) ||
+        hierarchy.list?.toLowerCase().includes(searchLower)
+      );
+      
+      return matchesCourse || matchesHierarchy;
+    });
   }
   
   // Apply frontend filtering for special cases
@@ -455,6 +626,13 @@ function CoursesPage() {
       const courseStatus = course.status || 'inactive';
       
       return courseStatus === filters.status;
+    });
+  }
+  
+  // Apply modality filtering
+  if (filters.modality) {
+    coursesList = coursesList.filter(course => {
+      return course.modality === filters.modality;
     });
   }
   
@@ -499,9 +677,13 @@ function CoursesPage() {
     return sortedGroups;
   })() : null;
 
+
   return (
     <>
     <div className="p-6">
+      {/* Breadcrumb */}
+      <Breadcrumb items={breadcrumbItems} clickable={false} />
+      
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between">
@@ -512,7 +694,13 @@ function CoursesPage() {
             </p>
           </div>
           <button 
-            onClick={() => navigate('/courses/create')}
+            onClick={() => {
+              if (listId) {
+                navigate(`/lists/${listId}/courses/create`);
+              } else {
+                navigate('/courses/create');
+              }
+            }}
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
             <Plus className="h-4 w-4 mr-2" />
@@ -522,20 +710,20 @@ function CoursesPage() {
       </div>
 
       {/* Search and Filters */}
-      <div className="mb-6 bg-white dark:bg-gray-800 shadow rounded-lg p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-4">
+      <div className="mb-6 bg-white dark:bg-gray-800 shadow rounded-lg p-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-2">
           {/* Search */}
           <div className="lg:col-span-2">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                <Search className="h-4 w-4 text-gray-400 dark:text-gray-500" />
               </div>
               <input
                 type="text"
                 placeholder="Search courses..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md leading-5 bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                className="block w-full pl-9 pr-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md leading-5 bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 text-gray-900 dark:text-white focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           </div>
@@ -545,7 +733,7 @@ function CoursesPage() {
             <select
               value={filters.priority}
               onChange={(e) => handleFilterChange('priority', e.target.value)}
-              className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              className="block w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">All Priorities</option>
               {PRIORITIES.map(priority => (
@@ -556,17 +744,17 @@ function CoursesPage() {
             </select>
           </div>
 
-          {/* Type Filter */}
+          {/* Modality Filter */}
           <div>
             <select
-              value={filters.type}
-              onChange={(e) => handleFilterChange('type', e.target.value)}
-              className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              value={filters.modality}
+              onChange={(e) => handleFilterChange('modality', e.target.value)}
+              className="block w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
             >
-              <option value="">All Types</option>
-              {TYPES.map(type => (
-                <option key={type} value={type}>
-                  {type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+              <option value="">All Modalities</option>
+              {MODALITIES.map(modality => (
+                <option key={modality.value} value={modality.value}>
+                  {modality.label}
                 </option>
               ))}
             </select>
@@ -577,7 +765,7 @@ function CoursesPage() {
             <select
               value={filters.status}
               onChange={(e) => handleFilterChange('status', e.target.value)}
-              className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              className="block w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="">All Statuses</option>
               {(statusesData?.data || statusesData || []).map((status) => (
@@ -593,9 +781,9 @@ function CoursesPage() {
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
-                className="w-full inline-flex items-center justify-center px-3 py-2 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="w-full inline-flex items-center justify-center px-2 py-1 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
               >
-                <Filter className="h-4 w-4 mr-2" />
+                <Filter className="h-3 w-3 mr-1" />
                 Clear
               </button>
             )}
@@ -620,14 +808,14 @@ function CoursesPage() {
                 }
                 setSearchParams(params);
               }}
-              className={`w-full inline-flex items-center justify-center px-3 py-2 border shadow-sm text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
+              className={`w-full inline-flex items-center justify-center px-2 py-1 border shadow-sm text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
                 groupBy === 'status'
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30'
                   : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
               }`}
             >
-              <Layers className="h-4 w-4 mr-2" />
-              Group by Status
+              <Layers className="h-3 w-3 mr-1" />
+              <span className="text-sm">Group by Status</span>
             </button>
           </div>
         </div>
@@ -663,16 +851,6 @@ function CoursesPage() {
         </div>
       )}
 
-      {/* Results Summary */}
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-sm text-gray-700 dark:text-gray-300">
-          {coursesList.length === 0 
-            ? 'No courses found' 
-            : `Showing ${coursesList.length} course${coursesList.length !== 1 ? 's' : ''}`
-          }
-        </p>
-      </div>
-
       {/* Courses List */}
       {coursesList.length === 0 ? (
         <div className="bg-white dark:bg-gray-800 shadow rounded-lg p-8 text-center">
@@ -689,7 +867,13 @@ function CoursesPage() {
             </p>
             {!hasActiveFilters && (
               <button 
-                onClick={() => navigate('/courses/create')}
+                onClick={() => {
+                  if (listId) {
+                    navigate(`/lists/${listId}/courses/create`);
+                  } else {
+                    navigate('/courses/create');
+                  }
+                }}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700"
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -701,36 +885,63 @@ function CoursesPage() {
       ) : groupBy === 'status' ? (
         // Grouped view
         <div className="space-y-6">
-          {Object.entries(groupedCourses).map(([statusLabel, statusCourses]) => (
-            <div key={statusLabel} className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-md">
-              <div className="bg-gray-100 dark:bg-gray-700 px-6 py-3 border-b border-gray-200 dark:border-gray-600">
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  {statusLabel} ({statusCourses.length})
-                </h3>
-              </div>
-              <div className="overflow-x-auto">
+          {Object.entries(groupedCourses).map(([statusLabel, statusCourses]) => {
+            const isExpanded = expandedStatusGroups.has(statusLabel);
+            
+            return (
+              <div key={statusLabel} className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-md">
+                <button
+                  onClick={() => {
+                    setExpandedStatusGroups(prev => {
+                      const newSet = new Set(prev);
+                      if (newSet.has(statusLabel)) {
+                        newSet.delete(statusLabel);
+                      } else {
+                        newSet.add(statusLabel);
+                      }
+                      return newSet;
+                    });
+                  }}
+                  className="w-full bg-gray-100 dark:bg-gray-700 px-1 py-1 border-b border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center justify-between"
+                >
+                  <div className="flex items-center space-x-2">
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-gray-500" />
+                    )}
+                    <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                      {statusLabel}
+                    </h3>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {statusCourses.length}
+                    </span>
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                         Course
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                         Status
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                         Progress
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                         Start Date
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                         Due Date
                       </th>
-                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                         Lead
                       </th>
-                      <th scope="col" className="relative px-6 py-3">
+                      <th scope="col" className="relative px-6 py-1">
                         <span className="sr-only">Actions</span>
                       </th>
                     </tr>
@@ -756,7 +967,7 @@ function CoursesPage() {
                       return (
                         <React.Fragment key={course.id}>
                           <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
-                            <td className="px-6 py-4 whitespace-nowrap">
+                            <td className="px-6 py-1 whitespace-nowrap">
                               <div className="flex items-center">
                                 <button
                                   onClick={(e) => {
@@ -781,17 +992,12 @@ function CoursesPage() {
                                   >
                                     {course.title}
                                   </button>
-                                  {course.description && (
-                                    <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">
-                                      {course.description}
-                                    </div>
-                                  )}
                                 </div>
                               </div>
                             </td>
 
                             {/* Status Column */}
-                            <td className="px-6 py-4 whitespace-nowrap">
+                            <td className="px-6 py-1 whitespace-nowrap">
                               <div className="flex items-center">
                                 <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
                                 <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
@@ -799,7 +1005,7 @@ function CoursesPage() {
                             </td>
 
                             {/* Progress Column */}
-                            <td className="px-6 py-4 whitespace-nowrap">
+                            <td className="px-6 py-1 whitespace-nowrap">
                               <CourseProgress 
                                 courseId={course.id} 
                                 fallbackPercentage={course.completion_percentage || 0} 
@@ -807,7 +1013,7 @@ function CoursesPage() {
                             </td>
 
                             {/* Start Date Column */}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                               {(course.startDate || course.start_date) ? (
                                 <div className="flex items-center">
                                   <Calendar className="h-4 w-4 mr-1 text-gray-400" />
@@ -819,7 +1025,7 @@ function CoursesPage() {
                             </td>
 
                             {/* Due Date Column */}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                               {(course.dueDate || course.due_date) ? (
                                 <div className="flex items-center">
                                   <Calendar className="h-4 w-4 mr-1 text-gray-400" />
@@ -831,7 +1037,7 @@ function CoursesPage() {
                             </td>
 
                             {/* Lead Column */}
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                               {course.owner ? (
                                 <div className="flex items-center">
                                   <Users className="h-4 w-4 mr-1 text-gray-400" />
@@ -843,26 +1049,68 @@ function CoursesPage() {
                             </td>
 
                             {/* Actions Column */}
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <div className="flex items-center justify-end space-x-2">
-                                <button 
+                            <td className="px-6 py-1 whitespace-nowrap text-right text-sm font-medium">
+                              <div className="relative">
+                                <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    navigate(`/courses/${course.id}`);
+                                    if (showDropdown === course.id) {
+                                      setShowDropdown(null);
+                                    } else {
+                                      const position = calculateDropdownPosition(e.currentTarget);
+                                      setDropdownPosition(position);
+                                      setShowDropdown(course.id);
+                                    }
                                   }}
-                                  className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                  title="More actions"
                                 >
-                                  View
+                                  <MoreHorizontal className="h-5 w-5" />
                                 </button>
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    navigate(`/courses/${course.id}/edit`);
-                                  }}
-                                  className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                                >
-                                  Edit
-                                </button>
+                                
+                                {showDropdown === course.id && (
+                                  <div 
+                                    className="fixed z-50 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700"
+                                    style={{
+                                      top: `${dropdownPosition.top}px`,
+                                      left: `${dropdownPosition.left}px`
+                                    }}
+                                  >
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/courses/${course.id}`);
+                                        setShowDropdown(null);
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                    >
+                                      <ArrowRight className="h-4 w-4" />
+                                      <span>View Details</span>
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/courses/${course.id}/edit`);
+                                        setShowDropdown(null);
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                    >
+                                      <Edit className="h-4 w-4" />
+                                      <span>Edit Course</span>
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDuplicateCourse(course.id);
+                                        setShowDropdown(null);
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                      <span>Duplicate Course</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -880,9 +1128,11 @@ function CoursesPage() {
                     })}
                   </tbody>
                 </table>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         // Regular ungrouped view
@@ -891,25 +1141,25 @@ function CoursesPage() {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     Course
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     Status
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     Progress
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     Start Date
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     Due Date
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     Lead
                   </th>
-                  <th scope="col" className="relative px-6 py-3">
+                  <th scope="col" className="relative px-6 py-1">
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -935,7 +1185,7 @@ function CoursesPage() {
                   return (
                     <React.Fragment key={course.id}>
                       <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-6 py-1 whitespace-nowrap">
                           <div className="flex items-center">
                             <button
                               onClick={(e) => {
@@ -960,17 +1210,12 @@ function CoursesPage() {
                               >
                                 {course.title}
                               </button>
-                              {course.description && (
-                                <div className="text-sm text-gray-500 dark:text-gray-400 truncate max-w-xs">
-                                  {course.description}
-                                </div>
-                              )}
                             </div>
                           </div>
                         </td>
                         
                         {/* Status Column */}
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-6 py-1 whitespace-nowrap">
                           <div className="flex items-center">
                             <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
                             <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
@@ -978,7 +1223,7 @@ function CoursesPage() {
                         </td>
 
                         {/* Progress Column */}
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-6 py-1 whitespace-nowrap">
                           <CourseProgress 
                             courseId={course.id} 
                             fallbackPercentage={course.completion_percentage || 0} 
@@ -986,7 +1231,7 @@ function CoursesPage() {
                         </td>
 
                         {/* Start Date Column */}
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                        <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                           {(course.startDate || course.start_date) ? (
                             <div className="flex items-center">
                               <Calendar className="h-4 w-4 mr-1 text-gray-400" />
@@ -998,7 +1243,7 @@ function CoursesPage() {
                         </td>
 
                         {/* Due Date Column */}
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                        <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                           {(course.dueDate || course.due_date) ? (
                             <div className="flex items-center">
                               <Calendar className="h-4 w-4 mr-1 text-gray-400" />
@@ -1010,26 +1255,68 @@ function CoursesPage() {
                         </td>
 
                         {/* Actions Column */}
-                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                          <div className="flex items-center justify-end space-x-2">
-                            <button 
+                        <td className="px-6 py-1 whitespace-nowrap text-right text-sm font-medium">
+                          <div className="relative">
+                            <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigate(`/courses/${course.id}`);
+                                if (showDropdown === course.id) {
+                                  setShowDropdown(null);
+                                } else {
+                                  const position = calculateDropdownPosition(e.currentTarget);
+                                  setDropdownPosition(position);
+                                  setShowDropdown(course.id);
+                                }
                               }}
-                              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                              className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                              title="More actions"
                             >
-                              View
+                              <MoreHorizontal className="h-5 w-5" />
                             </button>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                navigate(`/courses/${course.id}/edit`);
-                              }}
-                              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                            >
-                              Edit
-                            </button>
+                            
+                            {showDropdown === course.id && (
+                              <div 
+                                className="fixed z-50 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700"
+                                style={{
+                                  top: `${dropdownPosition.top}px`,
+                                  left: `${dropdownPosition.left}px`
+                                }}
+                              >
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/courses/${course.id}`);
+                                    setShowDropdown(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                >
+                                  <ArrowRight className="h-4 w-4" />
+                                  <span>View Details</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/courses/${course.id}/edit`);
+                                    setShowDropdown(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                  <span>Edit Course</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDuplicateCourse(course.id);
+                                    setShowDropdown(null);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center space-x-2"
+                                >
+                                  <Copy className="h-4 w-4" />
+                                  <span>Duplicate Course</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1048,6 +1335,13 @@ function CoursesPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+      
+      {/* Total Count - shown at bottom */}
+      {coursesList.length > 0 && (
+        <div className="mt-4 text-sm text-gray-600 dark:text-gray-400 text-right">
+          Total: {coursesList.length} {coursesList.length === 1 ? 'Course' : 'Courses'}
         </div>
       )}
     </div>
@@ -1181,8 +1475,9 @@ function CourseProgress({ courseId, fallbackPercentage = 0 }) {
   // Show loading state
   if (courseLoading || statusLoading || modalityLoading) {
     return (
-      <div className="w-32">
-        <div className="animate-pulse bg-gray-300 dark:bg-gray-600 h-2 rounded-full"></div>
+      <div className="flex items-center space-x-2">
+        <div className="w-20 animate-pulse bg-gray-300 dark:bg-gray-600 h-2 rounded-full"></div>
+        <span className="text-xs text-gray-400">--</span>
       </div>
     );
   }
@@ -1197,11 +1492,8 @@ function CourseProgress({ courseId, fallbackPercentage = 0 }) {
   }
   
   return (
-    <div className="w-32">
-      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-        <span>{progressPercentage}%</span>
-      </div>
-      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+    <div className="flex items-center space-x-2">
+      <div className="w-20 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
         <div 
           className={`h-2 rounded-full transition-all duration-300 ${
             progressPercentage === 100 ? 'bg-green-500' :
@@ -1212,6 +1504,7 @@ function CourseProgress({ courseId, fallbackPercentage = 0 }) {
           style={{ width: `${progressPercentage}%` }}
         ></div>
       </div>
+      <span className="text-xs text-gray-500 dark:text-gray-400">{progressPercentage}%</span>
     </div>
   );
 }
@@ -1561,14 +1854,13 @@ function CoursePhases({ courseId }) {
   return (
     <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 overflow-x-auto">
       <div className="space-y-2 min-w-full">
-        <div className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-          <ListTodo className="h-4 w-4 mr-2" />
-          <span>Phases of Development ({subtasks.length})</span>
+        <div className="text-sm font-medium text-gray-900 dark:text-white mb-1">
+          <span>Phases of Development</span>
         </div>
         
         {/* Column Headers */}
-        <div className="ml-6 mb-2">
-          <div className="flex text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+        <div className="mb-2">
+          <div className="flex text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wide px-6">
             <div className="w-48">Phase</div>
             <div className="w-28 ml-2">Status</div>
             <div className="w-40 ml-2">Assignees</div>
@@ -1578,6 +1870,9 @@ function CoursePhases({ courseId }) {
             <div className="w-32 ml-4">Signoff Date</div>
           </div>
         </div>
+        
+        {/* Phase rows container */}
+        <div>
         {subtasks.map((task, index) => {
           // Check for different possible ID field names
           const taskId = task.id || task.subtask_id || task.subtaskId || `temp-${index}`;
@@ -1603,8 +1898,8 @@ function CoursePhases({ courseId }) {
           const canEdit = !!(task.id || task.subtask_id || task.subtaskId); // Only allow editing if subtask has a real ID
 
           return (
-            <div key={task.id || index} className="group ml-6 py-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
-              <div className="flex items-center">
+            <div key={task.id || index} className="group bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800">
+              <div className="flex items-center py-1 px-6">
                 {/* Phase Icon and Title Column */}
                 <div className="w-48 flex items-center space-x-2">
                   {isUpdating ? (
@@ -1613,9 +1908,8 @@ function CoursePhases({ courseId }) {
                     <StatusIcon className={`h-4 w-4 ${currentStatus.color} flex-shrink-0`} />
                   )}
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{task.title}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      ({statusConfig?.completionPercentage || 0}% complete)
+                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {task.title} ({statusConfig?.completionPercentage || 0}%)
                     </div>
                   </div>
                 </div>
@@ -1921,6 +2215,7 @@ function CoursePhases({ courseId }) {
             </div>
           );
         })}
+        </div>
       </div>
       
     </div>

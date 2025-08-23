@@ -210,9 +210,9 @@ export function DashboardPage() {
               <div className="text-center py-6">
                 <BookOpen className="h-12 w-12 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
                 <p className="text-gray-500 dark:text-gray-400">No recent courses found</p>
-                <Link to="/courses">
+                <Link to="/programs">
                   <Button variant="outline" className="mt-2">
-                    View All Courses
+                    View Programs
                   </Button>
                 </Link>
               </div>
@@ -242,9 +242,9 @@ export function DashboardPage() {
                   </div>
                 ))}
                 <div className="pt-2">
-                  <Link to="/courses" className="block">
+                  <Link to="/programs" className="block">
                     <Button variant="outline" className="w-full">
-                      View All Courses
+                      View Programs
                     </Button>
                   </Link>
                 </div>

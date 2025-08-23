@@ -11,6 +11,7 @@ const createCourseSchema = Joi.object({
   title: Joi.string().min(3).max(255).required().trim(),
   description: Joi.string().max(2000).optional().allow(''),
   modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
+  listId: Joi.string().uuid().required(),
   deliverables: Joi.array().items(
     Joi.number().integer().positive()
   ).optional().when('modality', {
@@ -41,6 +42,8 @@ const createCourseSchema = Joi.object({
 const updateCourseSchema = Joi.object({
   title: Joi.string().min(3).max(255).optional().trim(),
   description: Joi.string().max(2000).optional().allow(''),
+  modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').optional(),
+  deliverables: Joi.array().items(Joi.number().integer().positive()).optional(),
   priority: Joi.string().valid('low', 'medium', 'high', 'critical').optional(),
   status: Joi.string().max(50).optional(),
   ownerId: Joi.number().integer().positive().optional(),
@@ -48,7 +51,9 @@ const updateCourseSchema = Joi.object({
   dueDate: Joi.date().optional(),
   estimatedHours: Joi.number().integer().min(1).max(1000).optional(),
   estimatedDailyHours: Joi.number().precision(2).min(0.5).max(16).optional(),
-  metadata: Joi.object().max(20).optional()
+  workflowTemplateId: Joi.number().integer().positive().optional(),
+  metadata: Joi.object().max(20).optional(),
+  listId: Joi.string().uuid().optional()
 });
 
 // Dynamic subtask schema that will be updated with valid phase statuses
@@ -123,6 +128,8 @@ class CourseController {
       dueAfter,
       search,
       workflowState,
+      program_id,
+      list_id,
       page = 1,
       limit = 20,
       sort = 'due_date',
@@ -185,6 +192,18 @@ class CourseController {
     if (search) {
       additionalWhere.push(`(c.title ILIKE $${++paramCount} OR c.description ILIKE $${++paramCount})`);
       values.push(`%${search}%`, `%${search}%`);
+    }
+
+    // Program filtering
+    if (program_id) {
+      additionalWhere.push(`c.program_id = $${++paramCount}`);
+      values.push(program_id);
+    }
+
+    // List filtering  
+    if (list_id) {
+      additionalWhere.push(`c.list_id = $${++paramCount}`);
+      values.push(list_id);
     }
 
     // Workflow state filtering
@@ -291,6 +310,7 @@ class CourseController {
       title,
       description,
       modality,
+      listId,
       deliverables = [],
       priority,
       ownerId,
@@ -302,6 +322,26 @@ class CourseController {
       metadata,
       assignments = []
     } = value;
+
+    // Check if list exists and user has access
+    const listCheck = await query(
+      `SELECT l.id, l.name, f.name as folder_name, p.name as program_name, p.id as program_id
+       FROM lists l
+       INNER JOIN folders f ON l.folder_id = f.id  
+       INNER JOIN programs p ON f.program_id = p.id
+       LEFT JOIN program_members pm ON p.id = pm.program_id
+       WHERE l.id = $1 AND (p.owner_id = $2 OR pm.user_id = $2)`,
+      [listId, req.user.id]
+    );
+
+    if (listCheck.rows.length === 0) {
+      throw new ValidationError('Invalid list', [{
+        field: 'listId',
+        message: 'List not found or access denied'
+      }]);
+    }
+
+    const listInfo = listCheck.rows[0];
 
     // Check if workflow template exists
     const templateCheck = await query(
@@ -317,16 +357,16 @@ class CourseController {
     }
 
     const result = await transaction(async (client) => {
-      // Create course
+      // Create course with program_id and folder_id from the list lookup
       const courseResult = await client.query(`
         INSERT INTO courses (
-          title, description, modality, type, priority, status, owner_id, start_date, due_date,
+          title, description, modality, list_id, folder_id, program_id, type, priority, status, owner_id, start_date, due_date,
           estimated_hours, estimated_daily_hours, metadata, created_by, updated_by,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, 'standard', $4, 'pre_development', $5, $6, $7, $8, $9, $10, $11, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'standard', $7, 'pre_development', $8, $9, $10, $11, $12, $13, $14, $14, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `, [
-        title, description, modality, priority, ownerId || req.user.id, startDate, dueDate,
+        title, description, modality, listId, listInfo.folder_id, listInfo.program_id, priority, ownerId || req.user.id, startDate, dueDate,
         estimatedHours, estimatedDailyHours, JSON.stringify(metadata || {}),
         req.user.id
       ]);
@@ -733,7 +773,24 @@ class CourseController {
 
     // Track changes
     const changes = {};
-    const allowedFields = ['title', 'description', 'type', 'priority', 'status', 'ownerId', 'startDate', 'dueDate', 'estimatedHours', 'estimatedDailyHours', 'metadata'];
+    const allowedFields = ['title', 'description', 'modality', 'priority', 'status', 'ownerId', 'startDate', 'dueDate', 'estimatedHours', 'estimatedDailyHours', 'metadata', 'listId'];
+    
+    // If listId is changing, we need to also update folder_id and program_id
+    let listInfo = null;
+    if (value.listId && value.listId !== currentCourse.list_id) {
+      const listCheck = await query(`
+        SELECT l.id, l.folder_id, f.program_id 
+        FROM lists l
+        JOIN folders f ON l.folder_id = f.id
+        WHERE l.id = $1
+      `, [value.listId]);
+      
+      if (listCheck.rows.length === 0) {
+        throw new ValidationError('Invalid list ID');
+      }
+      
+      listInfo = listCheck.rows[0];
+    }
     
     allowedFields.forEach(field => {
       const dbField = field.replace(/([A-Z])/g, '_$1').toLowerCase();
@@ -744,6 +801,18 @@ class CourseController {
         };
       }
     });
+    
+    // If list changed, also update folder_id and program_id
+    if (listInfo) {
+      changes.folderId = {
+        from: currentCourse.folder_id,
+        to: listInfo.folder_id
+      };
+      changes.programId = {
+        from: currentCourse.program_id,
+        to: listInfo.program_id
+      };
+    }
 
     if (Object.keys(changes).length === 0) {
       return res.json({
@@ -763,7 +832,12 @@ class CourseController {
       });
       
       const setClause = updateFields.map((field, index) => `${field} = $${index + 2}`).join(', ');
-      const updateValues = Object.keys(changes).map(field => value[field]);
+      const updateValues = Object.keys(changes).map(field => {
+        // Use the correct value for folder_id and program_id
+        if (field === 'folderId') return listInfo.folder_id;
+        if (field === 'programId') return listInfo.program_id;
+        return value[field];
+      });
 
       const result = await client.query(`
         UPDATE courses 
@@ -771,6 +845,24 @@ class CourseController {
         WHERE id = $1
         RETURNING *
       `, [id, ...updateValues, req.user.id]);
+
+      // Handle deliverables update if provided
+      if (value.deliverables !== undefined) {
+        // Delete existing deliverables
+        await client.query('DELETE FROM course_deliverables WHERE course_id = $1', [id]);
+        
+        // Insert new deliverables
+        if (value.deliverables && value.deliverables.length > 0) {
+          const deliverableValues = value.deliverables.map((deliverableId, index) => 
+            `($1, $${index + 2})`
+          ).join(', ');
+          
+          await client.query(
+            `INSERT INTO course_deliverables (course_id, deliverable_id) VALUES ${deliverableValues}`,
+            [id, ...value.deliverables]
+          );
+        }
+      }
 
       // Log the update
       await client.query(`

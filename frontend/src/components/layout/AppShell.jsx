@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Sidebar } from './Sidebar';
+import { HierarchicalSidebar } from './HierarchicalSidebar';
 import { Header } from './Header';
 import { useAuth } from '../../hooks/useAuth.jsx';
 import { cn } from '../../lib/utils';
@@ -18,7 +18,7 @@ export function AppShell() {
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
       {/* Sidebar with adjacent toggle button */}
       <div className="relative flex">
-        <Sidebar 
+        <HierarchicalSidebar 
           isOpen={sidebarOpen}
           isVisible={true}
           isCollapsed={sidebarCollapsed}

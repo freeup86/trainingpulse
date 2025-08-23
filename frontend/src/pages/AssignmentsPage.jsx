@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { users } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
+import Breadcrumb from '../components/navigation/Breadcrumb';
 
 function AssignmentsPage() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,7 +29,8 @@ function AssignmentsPage() {
     queryKey: ['users'],
     queryFn: async () => {
       const response = await users.getAll();
-      return response.data.data.users;
+      // Handle different possible response structures
+      return response.data?.data?.users || response.data?.users || response.data?.data || response.data || [];
     }
   });
 
@@ -70,7 +72,7 @@ function AssignmentsPage() {
   const isLoading = usersLoading || assignmentsLoading;
 
   // Filter and process data
-  const filteredUsers = usersData?.filter(user => {
+  const filteredUsers = (Array.isArray(usersData) ? usersData : [])?.filter(user => {
     const assignments = assignmentsData?.[user.id] || [];
     
     // Filter by search term
@@ -130,12 +132,14 @@ function AssignmentsPage() {
 
   return (
     <div className="p-6">
+      {/* Breadcrumb */}
+      <Breadcrumb items={[{ label: 'Assignments', href: '/assignments' }]} />
+      
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center">
-              <Users className="h-8 w-8 mr-3 text-blue-600" />
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
               Assignments Overview
             </h1>
             <p className="mt-2 text-gray-600 dark:text-gray-300">

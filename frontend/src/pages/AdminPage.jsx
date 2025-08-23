@@ -22,13 +22,18 @@ import {
   Lock,
   UserCheck,
   ListTodo,
-  Layers
+  Layers,
+  Building
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
 import { statuses, users, roles, permissions, phaseStatuses, modalityTasks } from '../lib/api';
+import Breadcrumb from '../components/navigation/Breadcrumb';
+import ProgramsTab from '../components/admin/ProgramsTab';
+import CustomFieldsTab from '../components/admin/CustomFieldsTab';
+import TeamsTab from '../components/admin/TeamsTab';
 
 // Status icons mapping
 const STATUS_ICONS = {
@@ -54,18 +59,19 @@ export default function AdminPage() {
   const { can } = usePermissions();
   const queryClient = useQueryClient();
   
-  // Tab management - use a simple default initially
-  const [activeTab, setActiveTab] = useState('statuses');
+  // Tab management - default to programs tab which is first
+  const [activeTab, setActiveTab] = useState('programs');
   
-  // Update active tab when permissions load
+  // Update active tab when permissions load - keep programs as default since it's the first tab
   useEffect(() => {
-    if (can.manageSettings) {
-      setActiveTab('statuses');
-    } else if (can.viewUsers) {
-      setActiveTab('users');
-    } else if (can.manageRoles || can.managePermissions) {
-      setActiveTab('roles');
+    // Programs tab is always available, so keep it as default
+    // Only change if user doesn't have access to any tabs
+    if (!can.manageSettings && !can.viewUsers && !can.manageRoles && !can.managePermissions) {
+      // If user has no admin permissions, they shouldn't be on this page
+      // but as fallback, keep programs tab
+      setActiveTab('programs');
     }
+    // Otherwise, keep the current active tab (programs by default)
   }, [can.manageSettings, can.viewUsers, can.manageRoles, can.managePermissions]);
   
   // Status management state
@@ -273,7 +279,7 @@ export default function AdminPage() {
     queryKey: ['admin-users'],
     queryFn: async () => {
       const response = await users.getAll();
-      return response.data;
+      return response.data.data;
     }
   });
 
@@ -691,15 +697,17 @@ export default function AdminPage() {
   }
 
   const statusesList = statusesData?.data || statusesData || [];
-  const usersList = usersData?.data?.users || usersData?.users || [];
+  const usersList = usersData?.users || [];
 
   return (
     <div className="p-6 space-y-6">
+      {/* Breadcrumb */}
+      <Breadcrumb items={[{ label: 'Admin', href: '/admin' }]} />
+      
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center">
-            <Settings className="h-8 w-8 mr-3" />
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             Admin Settings
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -711,6 +719,17 @@ export default function AdminPage() {
       {/* Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700">
         <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('programs')}
+            className={`${
+              activeTab === 'programs'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+            } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center`}
+          >
+            <Building className="h-4 w-4 mr-2" />
+            Programs & Clients
+          </button>
           {can.manageSettings && (
             <button
               onClick={() => setActiveTab('statuses')}
@@ -759,8 +778,34 @@ export default function AdminPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
               } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center`}
             >
-              <Users className="h-4 w-4 mr-2" />
+              <User className="h-4 w-4 mr-2" />
               Users
+            </button>
+          )}
+          {can.viewUsers && (
+            <button
+              onClick={() => setActiveTab('teams')}
+              className={`${
+                activeTab === 'teams'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center`}
+            >
+              <Users className="h-4 w-4 mr-2" />
+              Teams
+            </button>
+          )}
+          {can.manageSettings && (
+            <button
+              onClick={() => setActiveTab('custom-fields')}
+              className={`${
+                activeTab === 'custom-fields'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center`}
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Custom Fields
             </button>
           )}
           {(can.manageRoles || can.managePermissions) && (
@@ -780,6 +825,10 @@ export default function AdminPage() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === 'programs' && (
+        <ProgramsTab />
+      )}
+
       {activeTab === 'statuses' && can.manageSettings && (
         /* Course Status Management */
         <Card>
@@ -898,23 +947,20 @@ export default function AdminPage() {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
+                    <button
                       onClick={() => handleEdit(status)}
                       disabled={isLoading_mutations}
+                      className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Edit3 className="h-3 w-3" />
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
+                      <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                    </button>
+                    <button
                       onClick={() => handleDelete(status)}
                       disabled={isLoading_mutations}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-900/20"
+                      className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                      <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                    </button>
                   </div>
                 </div>
               );
@@ -1124,27 +1170,24 @@ export default function AdminPage() {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
+                    <button
                       onClick={() => handleEditUser(userData)}
                       disabled={editingUser === userData.id}
+                      className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Edit3 className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
+                      <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                    </button>
+                    <button
                       onClick={() => {
                         if (window.confirm('Are you sure you want to deactivate this user?')) {
                           deleteUserMutation.mutate(userData.id);
                         }
                       }}
                       disabled={deleteUserMutation.isLoading}
-                      className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                      className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                      <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -1160,6 +1203,10 @@ export default function AdminPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {activeTab === 'teams' && can.viewUsers && (
+        <TeamsTab />
       )}
 
       {activeTab === 'phase-statuses' && can.manageSettings && (
@@ -1388,21 +1435,18 @@ export default function AdminPage() {
                             </div>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
+                            <button
                               onClick={() => handleEditPhaseStatus(phaseStatus)}
+                              className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                             >
-                              <Edit3 className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
+                              <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                            </button>
+                            <button
                               onClick={() => handleDeletePhaseStatus(phaseStatus)}
-                              className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                              className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                             >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
+                              <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -1574,26 +1618,24 @@ export default function AdminPage() {
                           </div>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
+                          <button
                             onClick={() => handleEditModalityTask(task)}
                             disabled={editingModalityTask === task.id}
+                            className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <Edit3 className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
+                            <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                          </button>
+                          <button
                             onClick={() => {
                               if (window.confirm(`Are you sure you want to delete the "${task.task_type}" phase? This cannot be undone.`)) {
                                 deleteModalityTaskMutation.mutate(task.id);
                               }
                             }}
                             disabled={deleteModalityTaskMutation.isPending}
+                            className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+                            <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -1616,6 +1658,9 @@ export default function AdminPage() {
         </Card>
       )}
 
+      {activeTab === 'custom-fields' && can.manageSettings && (
+        <CustomFieldsTab />
+      )}
       {activeTab === 'roles' && (can.manageRoles || can.managePermissions) && (
         /* Role & Permissions Management */
         <RolesPermissionsTab />
@@ -2141,25 +2186,22 @@ function RolesPermissionsTab() {
                       </div>
                     </div>
                     <div className="flex items-center space-x-2 ml-4">
-                      <Button
-                        variant="outline"
-                        size="sm"
+                      <button
                         onClick={() => handleEditRole(role)}
+                        className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                       >
-                        <Edit3 className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
+                        <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                      </button>
+                      <button
                         onClick={() => {
                           if (window.confirm(`Are you sure you want to delete the "${role.display_name}" role?`)) {
                             deleteRoleMutation.mutate(role.id);
                           }
                         }}
-                        className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                        className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                       >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
+                        <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -2305,25 +2347,22 @@ function RolesPermissionsTab() {
                               )}
                             </div>
                             <div className="flex items-center space-x-2 ml-4">
-                              <Button
-                                variant="outline"
-                                size="sm"
+                              <button
                                 onClick={() => handleEditPermission(permission)}
+                                className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                               >
-                                <Edit3 className="h-3 w-3" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
+                                <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                              </button>
+                              <button
                                 onClick={() => {
                                   if (window.confirm(`Are you sure you want to delete the "${permission.display_name}" permission?`)) {
                                     deletePermissionMutation.mutate(permission.id);
                                   }
                                 }}
-                                className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                                className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                               >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                                <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                              </button>
                             </div>
                           </div>
                         ))}

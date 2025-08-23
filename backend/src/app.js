@@ -36,6 +36,12 @@ const phaseStatusRoutes = require('./routes/phaseStatusRoutes');
 const permissionRoutes = require('./routes/permissionRoutes');
 const userPermissionRoutes = require('./routes/userPermissionRoutes');
 const modalityRoutes = require('./routes/modalityRoutes');
+const programRoutes = require('./routes/programRoutes');
+const folderRoutes = require('./routes/folderRoutes');
+const listRoutes = require('./routes/listRoutes');
+const timeTrackingRoutes = require('./routes/timeTrackingRoutes');
+const commentsRoutes = require('./routes/commentsRoutes');
+const activityRoutes = require('./routes/activityRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -189,6 +195,12 @@ app.use(`/api/${API_VERSION}/roles`, authenticate, authenticatedLimiter, roleRou
 app.use(`/api/${API_VERSION}/permissions`, authenticate, authenticatedLimiter, permissionRoutes);
 app.use(`/api/${API_VERSION}/user-permissions`, authenticate, authenticatedLimiter, userPermissionRoutes);
 app.use(`/api/${API_VERSION}/modality`, authenticate, authenticatedLimiter, modalityRoutes);
+app.use(`/api/${API_VERSION}/programs`, authenticate, authenticatedLimiter, programRoutes);
+app.use(`/api/${API_VERSION}/folders`, authenticate, authenticatedLimiter, folderRoutes);
+app.use(`/api/${API_VERSION}/lists`, authenticate, authenticatedLimiter, listRoutes);
+app.use(`/api/${API_VERSION}/time-entries`, authenticate, authenticatedLimiter, timeTrackingRoutes);
+app.use(`/api/${API_VERSION}/comments`, authenticate, authenticatedLimiter, commentsRoutes);
+app.use(`/api/${API_VERSION}/activities`, authenticate, authenticatedLimiter, activityRoutes);
 
 // API documentation endpoint
 app.get(`/api/${API_VERSION}`, (req, res) => {

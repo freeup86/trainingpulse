@@ -20,15 +20,25 @@ import {
   Trash2,
   X,
   Package,
-  History
+  History,
+  MessageSquare,
+  UserPlus,
+  Activity,
+  Timer
 } from 'lucide-react';
-import { courses, statuses, phaseStatuses } from '../lib/api';
+import { courses, statuses, phaseStatuses, programs, folders, lists } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
+import { CourseBreadcrumb } from '../components/navigation/Breadcrumb';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import WorkflowMapModal from '../components/WorkflowMapModal';
 import PhaseHistoryModal from '../components/PhaseHistoryModal';
+import { TimeTrackerWidget } from '../components/TimeTracker';
+import { MultipleAssignees } from '../components/MultipleAssignees';
+import { Comments } from '../components/Comments';
+import { ActivityFeed } from '../components/ActivityFeed';
+import { CustomFields } from '../components/CustomFields';
 
 // Independent status definitions (separate from workflow)
 const COURSE_STATUSES = {
@@ -135,6 +145,35 @@ export default function CourseDetailPage() {
     refetchOnMount: false
   });
 
+  // Fetch hierarchy data for breadcrumbs
+  const courseForHierarchy = courseData?.data?.data || courseData?.data;
+  const listId = courseForHierarchy?.list_id;
+
+  const { data: listData } = useQuery({
+    queryKey: ['list', listId],
+    queryFn: () => lists.getById(listId),
+    enabled: !!listId
+  });
+
+  const list = listData?.data?.data || listData?.data;
+  const folderId = list?.folder_id;
+
+  const { data: folderData } = useQuery({
+    queryKey: ['folder', folderId],
+    queryFn: () => folders.getById(folderId),
+    enabled: !!folderId
+  });
+
+  const folder = folderData?.data?.data || folderData?.data;
+  const programId = folder?.program_id;
+
+  const { data: programData } = useQuery({
+    queryKey: ['program', programId],
+    queryFn: () => programs.getById(programId),
+    enabled: !!programId
+  });
+
+  const program = programData?.data?.data || programData?.data;
 
   // Delete course mutation
   const deleteMutation = useMutation({
@@ -142,7 +181,12 @@ export default function CourseDetailPage() {
     onSuccess: () => {
       toast.success('Course deleted successfully');
       queryClient.invalidateQueries(['courses']);
-      navigate('/courses');
+      // Navigate back to the list if we have a list_id, otherwise to programs
+      if (course?.list_id) {
+        navigate(`/lists/${course.list_id}/courses`);
+      } else {
+        navigate('/programs');
+      }
     },
     onError: (error) => {
       toast.error(error.response?.data?.error?.message || 'Failed to delete course');
@@ -241,8 +285,8 @@ export default function CourseDetailPage() {
         <div className="text-center py-12">
           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Course not found</h3>
           <p className="text-gray-500 dark:text-gray-400 mb-4">The course you're looking for doesn't exist.</p>
-          <Button onClick={() => navigate('/courses')}>
-            Back to Courses
+          <Button onClick={() => navigate('/programs')}>
+            Back to Programs
           </Button>
         </div>
       </div>
@@ -267,13 +311,23 @@ export default function CourseDetailPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Breadcrumb */}
+      <CourseBreadcrumb course={course} program={program} folder={folder} list={list} clickable={false} />
+      
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => navigate('/courses')}
+            onClick={() => {
+              // Navigate back to the list if we have a list_id, otherwise to programs
+              if (course?.list_id) {
+                navigate(`/lists/${course.list_id}/courses`);
+              } else {
+                navigate('/programs');
+              }
+            }}
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
@@ -625,6 +679,111 @@ export default function CourseDetailPage() {
                       <p className="text-xs text-gray-400">No phases have been added to this course</p>
                     </div>
                   )}
+            </CardContent>
+          </Card>
+
+          {/* Multiple Assignees Section - Hidden */}
+          {/* <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <UserPlus className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Team Members</CardTitle>
+              </div>
+              <CardDescription>
+                Manage course assignees and their roles
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <MultipleAssignees
+                entityType="course"
+                entityId={parseInt(id)}
+                currentAssignees={course.assignees || []}
+                onAssigneesChange={(newAssignees) => {
+                  // Handle assignee changes
+                  console.log('Assignees updated:', newAssignees);
+                }}
+                showRoles={true}
+              />
+            </CardContent>
+          </Card> */}
+
+          {/* Time Tracking Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <Timer className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Time Tracking</CardTitle>
+              </div>
+              <CardDescription>
+                Track time spent on this course
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TimeTrackerWidget
+                taskId={null}
+                courseId={parseInt(id)}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Custom Fields Section - Hidden */}
+          {/* <Card>
+            <CardHeader>
+              <CardTitle>Custom Fields</CardTitle>
+              <CardDescription>
+                Additional course information
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CustomFields
+                entityType="course"
+                entityId={parseInt(id)}
+                values={course.customFields || {}}
+                onValuesChange={(newValues) => {
+                  console.log('Custom fields updated:', newValues);
+                }}
+                showAddButton={true}
+              />
+            </CardContent>
+          </Card> */}
+
+          {/* Comments Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <MessageSquare className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Comments & Discussion</CardTitle>
+              </div>
+              <CardDescription>
+                Collaborate and discuss course details
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Comments
+                entityType="course"
+                entityId={parseInt(id)}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Activity Feed Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <Activity className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Activity History</CardTitle>
+              </div>
+              <CardDescription>
+                Recent changes and updates
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ActivityFeed
+                entityType="course"
+                entityId={parseInt(id)}
+                showFilters={false}
+                compact={true}
+              />
             </CardContent>
           </Card>
         </div>
