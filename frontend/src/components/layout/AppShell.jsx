@@ -55,8 +55,8 @@ export function AppShell() {
         />
 
         {/* Main content area */}
-        <main className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-4 lg:p-6">
-          <div className="mx-auto max-w-7xl">
+        <main className="flex-1 overflow-auto bg-gray-50 dark:bg-gray-900 p-2 lg:p-3">
+          <div>
             <Outlet />
           </div>
         </main>

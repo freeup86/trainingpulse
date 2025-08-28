@@ -11,10 +11,12 @@ const needsSSL = process.env.DATABASE_URL &&
 
 const dbConfig = {
   connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/trainingpulse',
-  max: parseInt(process.env.DATABASE_POOL_SIZE) || 10,
-  idleTimeoutMillis: 30000,
+  max: parseInt(process.env.DATABASE_POOL_SIZE) || 5, // Reduced from 10 to 5
+  min: 1, // Minimum pool size
+  idleTimeoutMillis: 10000, // Reduced from 30s to 10s
   connectionTimeoutMillis: 10000, // Increased from 2s to 10s
   query_timeout: 30000, // 30 second query timeout
+  allowExitOnIdle: true // Allow the pool to exit when idle
 };
 
 // Add SSL configuration if needed
@@ -144,7 +146,7 @@ function buildWhereClause(filters = {}) {
 function buildPaginationClause(page = 1, limit = 20) {
   const offset = (page - 1) * limit;
   return {
-    limit: Math.min(limit, 100), // Max 100 items per page
+    limit: Math.min(limit, 5000), // Increased max to 5000 items per page
     offset: Math.max(offset, 0)
   };
 }

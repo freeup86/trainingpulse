@@ -116,17 +116,22 @@ export function HierarchicalSidebar({ isOpen, isVisible, isCollapsed, onClose })
     queryFn: async () => {
       if (!programsData || programsData.length === 0) return [];
       
-      const allFolders = [];
-      for (const program of programsData) {
+      // Fetch all folders in parallel with individual timeouts
+      const folderPromises = programsData.map(async (program) => {
         try {
           const response = await folders.getAll({ programId: program.id });
-          const programFolders = response.data?.data || response.data || [];
-          allFolders.push(...programFolders);
+          return response.data?.data || response.data || [];
         } catch (error) {
-          console.error(`Failed to fetch folders for program ${program.id}:`, error);
+          // Silently handle timeouts and 404s
+          if (error.code !== 'ECONNABORTED' && error.response?.status !== 404) {
+            console.error(`Failed to fetch folders for program ${program.id}:`, error.message);
+          }
+          return []; // Return empty array on error
         }
-      }
-      return allFolders;
+      });
+      
+      const results = await Promise.all(folderPromises);
+      return results.flat();
     },
     enabled: !!user?.id && !!programsData && programsData.length > 0
   });
@@ -137,20 +142,22 @@ export function HierarchicalSidebar({ isOpen, isVisible, isCollapsed, onClose })
     queryFn: async () => {
       if (!foldersData || foldersData.length === 0) return [];
       
-      const allLists = [];
-      for (const folder of foldersData) {
+      // Fetch all lists in parallel with individual timeouts
+      const listPromises = foldersData.map(async (folder) => {
         try {
           const response = await lists.getAll({ folderId: folder.id });
-          const folderLists = response.data?.data || response.data || [];
-          allLists.push(...folderLists);
+          return response.data?.data || response.data || [];
         } catch (error) {
-          // Silently ignore 404 errors for deleted folders
-          if (error.response?.status !== 404) {
-            console.error(`Failed to fetch lists for folder ${folder.id}:`, error);
+          // Silently handle timeouts and 404s
+          if (error.response?.status !== 404 && error.code !== 'ECONNABORTED') {
+            console.error(`Failed to fetch lists for folder ${folder.id}:`, error.message || error);
           }
+          return []; // Return empty array on error
         }
-      }
-      return allLists;
+      });
+      
+      const results = await Promise.all(listPromises);
+      return results.flat();
     },
     enabled: !!user?.id && !!foldersData && foldersData.length > 0,
     retry: (failureCount, error) => {

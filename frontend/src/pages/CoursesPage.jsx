@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
+import { useResizableColumns } from '../hooks/useResizableColumns.jsx';
 import { 
   Search, 
   Filter, 
@@ -201,6 +202,7 @@ function CoursesPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { listId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCourse, setSelectedCourse] = useState(null);
@@ -222,6 +224,59 @@ function CoursesPage() {
   });
   const [showDropdown, setShowDropdown] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+
+  // Setup resizable columns with minimum widths to prevent header overflow
+  const tableColumns = [
+    { name: 'Course', defaultWidth: 150, minWidth: 100 },
+    { name: 'Progress', defaultWidth: 150, minWidth: 90 },
+    { name: 'Modality', defaultWidth: 100, minWidth: 85 },
+    { name: 'Start Date', defaultWidth: 120, minWidth: 100 },
+    { name: 'Due Date', defaultWidth: 120, minWidth: 90 },
+    { name: 'Lead', defaultWidth: 150, minWidth: 60 },
+    { name: 'Actions', defaultWidth: 80, minWidth: 80 }
+  ];
+
+  const tableColumnsWithStatus = [
+    { name: 'Course', defaultWidth: 150, minWidth: 100 },
+    { name: 'Status', defaultWidth: 140, minWidth: 90 },
+    { name: 'Progress', defaultWidth: 150, minWidth: 90 },
+    { name: 'Modality', defaultWidth: 100, minWidth: 85 },
+    { name: 'Start Date', defaultWidth: 120, minWidth: 100 },
+    { name: 'Due Date', defaultWidth: 120, minWidth: 90 },
+    { name: 'Lead', defaultWidth: 150, minWidth: 60 },
+    { name: 'Actions', defaultWidth: 80, minWidth: 80 }
+  ];
+
+  // When grouped by status, we don't show status column. Otherwise we do.
+  const currentColumns = groupBy === 'status' ? tableColumns : tableColumnsWithStatus;
+  
+  const { columnWidths, createResizeHandle, setColumnWidths, resetToDefaults } = useResizableColumns(
+    currentColumns, 
+    `courses-table-${listId || 'all'}-${groupBy || 'none'}`
+  );
+  
+  // Force reset on mount to ensure proper defaults
+  useEffect(() => {
+    console.log('Resetting to defaults on mount');
+    resetToDefaults();
+  }, [resetToDefaults]);
+  
+  // Debug: Track columnWidths changes
+  useEffect(() => {
+    console.log('CoursesPage - columnWidths:', columnWidths);
+    console.log('CoursesPage - Course width should be:', columnWidths[0] || 150);
+    console.log('CoursesPage - currentColumns:', currentColumns);
+    // Check if resize handles are working
+    const handles = document.querySelectorAll('.cursor-col-resize');
+    console.log('Found resize handles:', handles.length);
+  }, [columnWidths, currentColumns]);
+  
+  // Calculate total table width - ensure we have valid widths
+  const totalTableWidth = currentColumns.reduce((sum, col, index) => {
+    const width = columnWidths[index] || col.defaultWidth || 150;
+    return sum + width;
+  }, 0);
+  console.log('Total table width:', totalTableWidth);
 
   // Function to calculate dropdown position
   const calculateDropdownPosition = (buttonElement) => {
@@ -336,8 +391,6 @@ function CoursesPage() {
 
 
 
-  const { listId } = useParams();
-
   const { data: coursesData, isLoading, error } = useQuery({
     queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { 
       priority: filters.priority, 
@@ -351,7 +404,7 @@ function CoursesPage() {
         modality: filters.modality || undefined,
         list_id: listId || undefined, // Filter by list if in list context
         // Don't send status to backend - we'll filter on frontend using derived status
-        limit: 50
+        limit: 1000 // Increased to show all courses
       };
       
       // Admin users get all courses, other users get only their assigned courses
@@ -818,6 +871,19 @@ function CoursesPage() {
               <span className="text-sm">Group by Status</span>
             </button>
           </div>
+
+          {/* Temporary Reset Column Widths Button */}
+          <div>
+            <button
+              onClick={() => {
+                resetToDefaults();
+                console.log('Column widths reset to defaults');
+              }}
+              className="w-full inline-flex items-center justify-center px-2 py-1 border border-red-300 dark:border-red-600 shadow-sm text-sm font-medium rounded-md text-red-700 dark:text-red-300 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+            >
+              Reset Widths
+            </button>
+          </div>
         </div>
       </div>
 
@@ -888,6 +954,20 @@ function CoursesPage() {
           {Object.entries(groupedCourses).map(([statusLabel, statusCourses]) => {
             const isExpanded = expandedStatusGroups.has(statusLabel);
             
+            // Find the status info to get the icon and color
+            const statusesList = statusesData?.data || statusesData || [];
+            // Find by label since we're grouping by label
+            const statusInfo = statusesList.find(s => s.label === statusLabel) || 
+                              COURSE_STATUSES[statusLabel.toLowerCase()] || 
+                              { icon: 'Circle', color: 'text-gray-500 dark:text-gray-400', label: statusLabel };
+            
+            const StatusIcon = statusInfo.icon === 'CheckCircle' ? CheckCircle :
+                              statusInfo.icon === 'Circle' ? Circle :
+                              statusInfo.icon === 'Pause' ? Pause :
+                              statusInfo.icon === 'X' ? X :
+                              statusInfo.icon === 'AlertTriangle' ? AlertTriangle :
+                              Circle;
+            
             return (
               <div key={statusLabel} className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-md">
                 <button
@@ -910,6 +990,7 @@ function CoursesPage() {
                     ) : (
                       <ChevronRight className="h-4 w-4 text-gray-500" />
                     )}
+                    <StatusIcon className={`h-4 w-4 ${statusInfo.color}`} />
                     <h3 className="text-sm font-medium text-gray-900 dark:text-white">
                       {statusLabel}
                     </h3>
@@ -920,26 +1001,46 @@ function CoursesPage() {
                 </button>
                 {isExpanded && (
                   <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                <table 
+                  className="divide-y divide-gray-200 dark:divide-gray-700"
+                  style={{ 
+                    tableLayout: 'fixed',
+                    width: `${totalTableWidth}px`
+                  }}>
+                  <colgroup>
+                    <col style={{ width: `${columnWidths[0] || 150}px` }} />
+                    <col style={{ width: `${columnWidths[1] || 150}px` }} />
+                    <col style={{ width: `${columnWidths[2] || 100}px` }} />
+                    <col style={{ width: `${columnWidths[3] || 120}px` }} />
+                    <col style={{ width: `${columnWidths[4] || 120}px` }} />
+                    <col style={{ width: `${columnWidths[5] || 150}px` }} />
+                    <col style={{ width: `${columnWidths[6] || 80}px` }} />
+                  </colgroup>
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
-                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                        Course
+                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
+                        <span className="truncate block pr-2" title="Course">Course</span>
+                        {createResizeHandle(0)}
                       </th>
-                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                        Status
+                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
+                        <span className="truncate block pr-2" title="Progress">Progress</span>
+                        {createResizeHandle(1)}
                       </th>
-                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                        Progress
+                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
+                        <span className="truncate block pr-2" title="Modality">Modality</span>
+                        {createResizeHandle(2)}
                       </th>
-                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                        Start Date
+                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
+                        <span className="truncate block pr-2" title="Start Date">Start Date</span>
+                        {createResizeHandle(3)}
                       </th>
-                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                        Due Date
+                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
+                        <span className="truncate block pr-2" title="Due Date">Due Date</span>
+                        {createResizeHandle(4)}
                       </th>
-                      <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                        Lead
+                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
+                        <span className="truncate block pr-2" title="Lead">Lead</span>
+                        {createResizeHandle(5)}
                       </th>
                       <th scope="col" className="relative px-6 py-1">
                         <span className="sr-only">Actions</span>
@@ -967,8 +1068,8 @@ function CoursesPage() {
                       return (
                         <React.Fragment key={course.id}>
                           <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
-                            <td className="px-6 py-1 whitespace-nowrap">
-                              <div className="flex items-center">
+                            <td className="px-6 py-1 overflow-hidden">
+                              <div className="flex items-center min-w-0">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -982,42 +1083,44 @@ function CoursesPage() {
                                     <ChevronRight className="h-5 w-5" />
                                   )}
                                 </button>
-                                <div>
+                                <div className="min-w-0 flex-1 overflow-hidden">
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       openCourseModal(course);
                                     }}
-                                    className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left"
+                                    className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left truncate block w-full"
                                   >
+                                    {course.course_code && (
+                                      <span className="text-gray-500 dark:text-gray-400 mr-2">{course.course_code}</span>
+                                    )}
                                     {course.title}
                                   </button>
                                 </div>
                               </div>
                             </td>
 
-                            {/* Status Column */}
-                            <td className="px-6 py-1 whitespace-nowrap">
-                              <div className="flex items-center">
-                                <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
-                                <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
-                              </div>
-                            </td>
-
                             {/* Progress Column */}
-                            <td className="px-6 py-1 whitespace-nowrap">
+                            <td className="px-6 py-1 overflow-hidden">
                               <CourseProgress 
                                 courseId={course.id} 
                                 fallbackPercentage={course.completion_percentage || 0} 
                               />
                             </td>
 
+                            {/* Modality Column */}
+                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white" style={{ width: `${columnWidths[2] || currentColumns[2]?.defaultWidth || 150}px`, minWidth: `${currentColumns[2]?.minWidth || 50}px`, maxWidth: `${columnWidths[2]}px` }}>
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                {course.modality || 'N/A'}
+                              </span>
+                            </td>
+
                             {/* Start Date Column */}
-                            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                               {(course.startDate || course.start_date) ? (
                                 <div className="flex items-center">
-                                  <Calendar className="h-4 w-4 mr-1 text-gray-400" />
-                                  <span>{formatDate(course.startDate || course.start_date)}</span>
+                                  <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                                  <span className="truncate">{formatDate(course.startDate || course.start_date)}</span>
                                 </div>
                               ) : (
                                 <span className="text-gray-400">—</span>
@@ -1025,11 +1128,11 @@ function CoursesPage() {
                             </td>
 
                             {/* Due Date Column */}
-                            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                               {(course.dueDate || course.due_date) ? (
                                 <div className="flex items-center">
-                                  <Calendar className="h-4 w-4 mr-1 text-gray-400" />
-                                  <span>{formatDate(course.dueDate || course.due_date)}</span>
+                                  <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                                  <span className="truncate">{formatDate(course.dueDate || course.due_date)}</span>
                                 </div>
                               ) : (
                                 <span className="text-gray-400">—</span>
@@ -1037,11 +1140,11 @@ function CoursesPage() {
                             </td>
 
                             {/* Lead Column */}
-                            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                               {course.owner ? (
                                 <div className="flex items-center">
-                                  <Users className="h-4 w-4 mr-1 text-gray-400" />
-                                  <span>{course.owner.name}</span>
+                                  <Users className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                                  <span className="truncate">{course.owner.name}</span>
                                 </div>
                               ) : (
                                 <span className="text-gray-400">—</span>
@@ -1049,7 +1152,7 @@ function CoursesPage() {
                             </td>
 
                             {/* Actions Column */}
-                            <td className="px-6 py-1 whitespace-nowrap text-right text-sm font-medium">
+                            <td className="px-6 py-1 overflow-hidden text-right text-sm font-medium" style={{ width: `${columnWidths[6] || currentColumns[6]?.defaultWidth || 150}px`, minWidth: `${currentColumns[6]?.minWidth || 50}px`, maxWidth: `${columnWidths[6]}px` }}>
                               <div className="relative">
                                 <button
                                   onClick={(e) => {
@@ -1116,7 +1219,7 @@ function CoursesPage() {
                           </tr>
                           {isExpanded && (
                             <tr className="bg-gray-50 dark:bg-gray-900">
-                              <td colSpan="7" className="p-0">
+                              <td colSpan="8" className="p-0">
                                 <div className="border-t border-gray-200 dark:border-gray-700">
                                   <CoursePhases courseId={course.id} />
                                 </div>
@@ -1136,28 +1239,48 @@ function CoursesPage() {
         </div>
       ) : (
         // Regular ungrouped view
-        <div className="bg-white dark:bg-gray-800 shadow overflow-hidden sm:rounded-md">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <div className="bg-white dark:bg-gray-800 shadow sm:rounded-md">
+          <div style={{ overflowX: 'auto', width: '100%' }}>
+            <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: `${totalTableWidth}px` }}>
+              <colgroup>
+                <col style={{ width: `${columnWidths[0] || 150}px` }} />
+                <col style={{ width: `${columnWidths[1] || 140}px` }} />
+                <col style={{ width: `${columnWidths[2] || 150}px` }} />
+                <col style={{ width: `${columnWidths[3] || 100}px` }} />
+                <col style={{ width: `${columnWidths[4] || 120}px` }} />
+                <col style={{ width: `${columnWidths[5] || 120}px` }} />
+                <col style={{ width: `${columnWidths[6] || 150}px` }} />
+                <col style={{ width: `${columnWidths[7] || 80}px` }} />
+              </colgroup>
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
-                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                    Course
+                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
+                    <span className="truncate block pr-2" title="Course">Course</span>
+                    {createResizeHandle(0)}
                   </th>
-                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                    Status
+                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
+                    <span className="truncate block pr-2" title="Status">Status</span>
+                    {createResizeHandle(1)}
                   </th>
-                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                    Progress
+                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
+                    <span className="truncate block pr-2" title="Progress">Progress</span>
+                    {createResizeHandle(2)}
                   </th>
-                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                    Start Date
+                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
+                    <span className="truncate block pr-2" title="Modality">Modality</span>
+                    {createResizeHandle(3)}
                   </th>
-                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                    Due Date
+                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
+                    <span className="truncate block pr-2" title="Start Date">Start Date</span>
+                    {createResizeHandle(4)}
                   </th>
-                  <th scope="col" className="px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
-                    Lead
+                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
+                    <span className="truncate block pr-2" title="Due Date">Due Date</span>
+                    {createResizeHandle(5)}
+                  </th>
+                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
+                    <span className="truncate block pr-2" title="Lead">Lead</span>
+                    {createResizeHandle(6)}
                   </th>
                   <th scope="col" className="relative px-6 py-1">
                     <span className="sr-only">Actions</span>
@@ -1185,14 +1308,14 @@ function CoursesPage() {
                   return (
                     <React.Fragment key={course.id}>
                       <tr className="group hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <td className="px-6 py-1 whitespace-nowrap">
-                          <div className="flex items-center">
+                        <td className="px-6 py-1 overflow-hidden">
+                          <div className="flex items-center" style={{ width: '100%' }}>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 toggleCourseExpansion(course.id);
                               }}
-                              className="mr-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                              className="mr-2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 flex-shrink-0"
                             >
                               {isExpanded ? (
                                 <ChevronDown className="h-5 w-5" />
@@ -1200,42 +1323,53 @@ function CoursesPage() {
                                 <ChevronRight className="h-5 w-5" />
                               )}
                             </button>
-                            <div>
+                            <div className="overflow-hidden" style={{ maxWidth: 'calc(100% - 32px)' }}>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   openCourseModal(course);
                                 }}
-                                className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left"
+                                className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left truncate block"
+                                title={`${course.course_code ? course.course_code + ' - ' : ''}${course.title}`}
                               >
-                                {course.title}
+                                {course.course_code && (
+                                  <span className="text-gray-500 dark:text-gray-400 mr-1 text-xs">{course.course_code}</span>
+                                )}
+                                <span className="truncate">{course.title}</span>
                               </button>
                             </div>
                           </div>
                         </td>
                         
                         {/* Status Column */}
-                        <td className="px-6 py-1 whitespace-nowrap">
+                        <td className="px-6 py-1 overflow-hidden">
                           <div className="flex items-center">
-                            <StatusIcon className={`h-4 w-4 mr-1 ${statusInfo.color}`} />
-                            <span className="text-sm text-gray-900 dark:text-white">{statusInfo.label}</span>
+                            <StatusIcon className={`h-4 w-4 mr-1 flex-shrink-0 ${statusInfo.color}`} />
+                            <span className="text-sm text-gray-900 dark:text-white truncate">{statusInfo.label}</span>
                           </div>
                         </td>
 
                         {/* Progress Column */}
-                        <td className="px-6 py-1 whitespace-nowrap">
+                        <td className="px-6 py-1 overflow-hidden">
                           <CourseProgress 
                             courseId={course.id} 
                             fallbackPercentage={course.completion_percentage || 0} 
                           />
                         </td>
 
+                        {/* Modality Column */}
+                        <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                            {course.modality || 'N/A'}
+                          </span>
+                        </td>
+
                         {/* Start Date Column */}
-                        <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                        <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                           {(course.startDate || course.start_date) ? (
                             <div className="flex items-center">
-                              <Calendar className="h-4 w-4 mr-1 text-gray-400" />
-                              <span>{formatDate(course.startDate || course.start_date)}</span>
+                              <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                              <span className="truncate">{formatDate(course.startDate || course.start_date)}</span>
                             </div>
                           ) : (
                             <span className="text-gray-400">—</span>
@@ -1243,11 +1377,23 @@ function CoursesPage() {
                         </td>
 
                         {/* Due Date Column */}
-                        <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                        <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                           {(course.dueDate || course.due_date) ? (
                             <div className="flex items-center">
-                              <Calendar className="h-4 w-4 mr-1 text-gray-400" />
-                              <span>{formatDate(course.dueDate || course.due_date)}</span>
+                              <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                              <span className="truncate">{formatDate(course.dueDate || course.due_date)}</span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </td>
+
+                        {/* Lead Column */}
+                        <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
+                          {course.owner ? (
+                            <div className="flex items-center">
+                              <Users className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                              <span className="truncate">{course.owner.name}</span>
                             </div>
                           ) : (
                             <span className="text-gray-400">—</span>
@@ -1255,7 +1401,7 @@ function CoursesPage() {
                         </td>
 
                         {/* Actions Column */}
-                        <td className="px-6 py-1 whitespace-nowrap text-right text-sm font-medium">
+                        <td className="px-6 py-1 overflow-hidden text-right text-sm font-medium">
                           <div className="relative">
                             <button
                               onClick={(e) => {
@@ -1352,9 +1498,16 @@ function CoursesPage() {
         <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
           <div className="p-6">
             <div className="flex justify-between items-start mb-4">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-                {selectedCourse.title}
-              </h2>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                  {selectedCourse.title}
+                </h2>
+                {selectedCourse.course_code && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Course Code: {selectedCourse.course_code}
+                  </p>
+                )}
+              </div>
               <button
                 onClick={closeCourseModal}
                 className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
@@ -1482,11 +1635,23 @@ function CourseProgress({ courseId, fallbackPercentage = 0 }) {
     );
   }
   
-  // Show error state
+  // Show error state or use fallback
   if (courseError || statusError) {
+    // Use fallback percentage if available instead of showing error
     return (
-      <div className="w-32">
-        <span className="text-xs text-red-500">Error</span>
+      <div className="flex items-center space-x-2">
+        <div className="w-20 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+          <div 
+            className={`h-2 rounded-full transition-all duration-300 ${
+              fallbackPercentage === 100 ? 'bg-green-500' :
+              fallbackPercentage >= 75 ? 'bg-blue-500' :
+              fallbackPercentage >= 50 ? 'bg-yellow-500' :
+              fallbackPercentage >= 25 ? 'bg-orange-500' : 'bg-red-500'
+            }`}
+            style={{ width: `${fallbackPercentage}%` }}
+          ></div>
+        </div>
+        <span className="text-xs text-gray-500 dark:text-gray-400">{fallbackPercentage}%</span>
       </div>
     );
   }

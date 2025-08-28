@@ -5,7 +5,7 @@ const API_VERSION = import.meta.env.VITE_API_VERSION || 'v1';
 
 // Create axios instance with dynamic baseURL
 const api = axios.create({
-  timeout: 10000,
+  timeout: 30000, // Increased timeout to 30 seconds to handle slower requests
   headers: {
     'Content-Type': 'application/json',
   },
@@ -376,6 +376,24 @@ export const statuses = {
   
   getById: (id) =>
     api.get(`/statuses/${id}`),
+};
+
+// Priority management API
+export const priorities = {
+  getAll: () =>
+    api.get('/priorities'),
+  
+  create: (priorityData) =>
+    api.post('/priorities', priorityData),
+  
+  update: (id, priorityData) =>
+    api.put(`/priorities/${id}`, priorityData),
+  
+  delete: (id) =>
+    api.delete(`/priorities/${id}`),
+  
+  getById: (id) =>
+    api.get(`/priorities/${id}`),
 };
 
 export const roles = {

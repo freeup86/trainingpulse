@@ -102,7 +102,7 @@ function DataManagementPage() {
   // Fetch courses data
   const { data: coursesData, isLoading: coursesLoading, error: coursesError } = useQuery({
     queryKey: ['courses'],
-    queryFn: () => courses.getAll()
+    queryFn: () => courses.getAll({ limit: 1000 }) // Fetch up to 1000 courses
   });
   
   // Fetch users data
@@ -198,27 +198,241 @@ function DataManagementPage() {
     }
   });
 
+  // Helper function to create downloadable error report
+  const downloadErrorReport = (errors, timestamp) => {
+    // Group errors by type for better organization
+    const hierarchyErrors = errors.filter(e => e.includes('Hierarchy not found'));
+    const validationErrors = errors.filter(e => !e.includes('Hierarchy not found'));
+    
+    const reportContent = [
+      'TRAININGPULSE COURSE IMPORT ERROR REPORT',
+      '=' .repeat(50),
+      `Generated: ${new Date(timestamp).toLocaleString()}`,
+      `Total Errors: ${errors.length}`,
+      '',
+      hierarchyErrors.length > 0 ? [
+        'HIERARCHY ERRORS (Courses skipped due to missing Program/Folder/List):',
+        '-'.repeat(50),
+        ...hierarchyErrors.map((error, index) => `${index + 1}. ${error}`),
+        ''
+      ].join('\n') : '',
+      validationErrors.length > 0 ? [
+        'DATA VALIDATION ERRORS:',
+        '-'.repeat(50),
+        ...validationErrors.map((error, index) => `${index + 1}. ${error}`),
+        ''
+      ].join('\n') : '',
+      'RESOLUTION GUIDE:',
+      '-'.repeat(50),
+      '• Hierarchy not found:',
+      '  - Ensure the Program, Folder, and List already exist in the system',
+      '  - Check for exact spelling and capitalization',
+      '',
+      '• Modality errors:',
+      '  - Valid values: WBT, ILT/VLT, Micro Learning, SIMS, DAP',
+      '  - Case sensitive - must match exactly',
+      '',
+      '• Priority errors:',
+      '  - Valid values: Low, Medium, High, Critical',
+      '  - Not case sensitive',
+      '',
+      '• Date errors:',
+      '  - Use format: YYYY-MM-DD (e.g., 2024-03-15)',
+      '  - Ensure Due Date is after Start Date',
+      '',
+      '• Required fields:',
+      '  - Title, Program, Folder, and List are mandatory',
+      '  - For WBT courses, deliverables are required',
+      '',
+      'For additional help, contact your system administrator.'
+    ].join('\n').replace(/\n\n+/g, '\n\n'); // Remove extra blank lines
+    
+    // Create blob and download
+    const blob = new Blob([reportContent], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `import_errors_${new Date(timestamp).toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
+  // Helper function to categorize errors
+  const categorizeError = (error) => {
+    // User-actionable errors
+    const userErrors = [
+      'Hierarchy not found',
+      'List ID is missing',
+      'Invalid course data',
+      'Invalid modality',
+      'Invalid priority',
+      'Missing required',
+      'Invalid date',
+      'does not exist',
+      'not found'
+    ];
+    
+    // Technical/system errors to exclude
+    const technicalErrors = [
+      'Network error',
+      'Server error',
+      'Database error',
+      'Connection refused',
+      '500',
+      '502',
+      '503',
+      'timeout'
+    ];
+    
+    const errorLower = error.toLowerCase();
+    
+    // Check if it's a technical error
+    for (const techError of technicalErrors) {
+      if (errorLower.includes(techError.toLowerCase())) {
+        return 'technical';
+      }
+    }
+    
+    // Check if it's a user-actionable error
+    for (const userError of userErrors) {
+      if (errorLower.includes(userError.toLowerCase())) {
+        return 'user';
+      }
+    }
+    
+    // Default to user error for validation issues
+    return error.includes('course') ? 'user' : 'technical';
+  };
+
   // Import courses mutation
   const importCoursesMutation = useMutation({
     mutationFn: async (coursesToImport) => {
       const results = [];
+      const errors = [];
+      const userActionableErrors = [];
+      let processed = 0;
+      const total = coursesToImport.length;
+      
+      // Create a loading toast that we'll update
+      const progressToast = toast.loading(`Importing courses: 0/${total}`);
+      
       for (const course of coursesToImport) {
         try {
-          const result = await courses.create(course);
+          // If no listId, log error and skip
+          if (!course.listId) {
+            const errorMsg = `Course "${course.title}": ${course._hierarchyNames ? 
+              `Hierarchy not found - Program: "${course._hierarchyNames.program}", Folder: "${course._hierarchyNames.folder}", List: "${course._hierarchyNames.list}"` : 
+              'Required hierarchy information is missing'}`;
+            errors.push(errorMsg);
+            userActionableErrors.push(errorMsg);
+            continue; // Skip this course
+          }
+          
+          // Remove the temporary hierarchy names field before sending to API
+          const { _hierarchyNames, ...courseDataToSend } = course;
+          
+          // Log what we're sending for debugging
+          console.log('Sending course data:', courseDataToSend);
+          
+          const result = await courses.create(courseDataToSend);
           results.push(result);
+          
+          // Update progress
+          processed++;
+          toast.loading(`Importing courses: ${processed}/${total}`, { id: progressToast });
         } catch (error) {
-          console.error('Failed to create course:', course.title, error);
-          throw error;
+          processed++;
+          toast.loading(`Importing courses: ${processed}/${total}`, { id: progressToast });
+          // Extract specific validation error details
+          let specificError = error.response?.data?.error?.message || error.message;
+          
+          // Check if there are validation details from Joi
+          if (error.response?.data?.error?.details && Array.isArray(error.response.data.error.details)) {
+            const validationDetails = error.response.data.error.details;
+            console.error('Validation error details:', validationDetails);
+            
+            // Extract the specific field errors from Joi validation
+            const fieldErrors = validationDetails.map(detail => {
+              // Clean up the Joi error message to be more user-friendly
+              let message = detail.message || '';
+              
+              // Replace technical field names with user-friendly names
+              message = message.replace(/\"listId\"/, '"List"')
+                              .replace(/\"startDate\"/, '"Start Date"')
+                              .replace(/\"dueDate\"/, '"Due Date"')
+                              .replace(/\"workflowTemplateId\"/, '"Workflow Template"')
+                              .replace(/\"course_code\"/, '"Course Code"')
+                              .replace(/\"modality\"/, '"Modality"')
+                              .replace(/\"priority\"/, '"Priority"');
+              
+              // Make the message more readable
+              if (message.includes('is required')) {
+                const field = message.match(/"([^"]+)"/)?.[1] || 'Field';
+                message = `${field} is required`;
+              } else if (message.includes('must be one of')) {
+                const field = message.match(/"([^"]+)"/)?.[1] || 'Field';
+                const values = message.match(/\[([^\]]+)\]/)?.[1] || '';
+                message = `${field} must be one of: ${values}`;
+              } else if (message.includes('must be a valid')) {
+                const field = message.match(/"([^"]+)"/)?.[1] || 'Field';
+                const type = message.match(/must be a valid (\w+)/)?.[1] || 'value';
+                message = `${field} must be a valid ${type}`;
+              }
+              
+              return message;
+            }).join('; ');
+            
+            if (fieldErrors) {
+              specificError = fieldErrors;
+            }
+          }
+          
+          const errorMsg = `Course "${course.title}": ${specificError}`;
+          errors.push(errorMsg);
+          
+          // Only add to user-actionable errors if it's not a technical issue
+          if (categorizeError(errorMsg) === 'user') {
+            userActionableErrors.push(errorMsg);
+          }
         }
       }
-      return results;
+      
+      // Dismiss the progress toast
+      toast.dismiss(progressToast);
+      
+      // Return results, all errors, and user-actionable errors separately
+      return { results, errors, userActionableErrors };
     },
     onSuccess: (data) => {
-      toast.success(`Successfully imported ${data.length} courses`);
-      queryClient.invalidateQueries(['courses']);
+      const { results, errors, userActionableErrors } = data;
+      const timestamp = Date.now();
+      
+      if (results.length > 0) {
+        toast.success(`✅ Successfully imported ${results.length} course${results.length > 1 ? 's' : ''}`);
+        queryClient.invalidateQueries(['courses']);
+      }
+      
+      if (errors.length > 0) {
+        // If there are user-actionable errors, download the error report
+        if (userActionableErrors.length > 0) {
+          toast.error(`Failed to import ${errors.length} course${errors.length > 1 ? 's' : ''}. Downloading error report...`);
+          downloadErrorReport(userActionableErrors, timestamp);
+        } else {
+          // Only technical errors - don't download report
+          toast.error(`Import failed due to system issues. Please try again later or contact support.`);
+        }
+        
+        // Log all errors to console for debugging
+        console.group('Import Errors (All):');
+        errors.forEach(error => console.error(error));
+        console.groupEnd();
+      }
     },
     onError: (error) => {
-      toast.error('Failed to import some courses. Please check the data and try again.');
+      toast.error('Import process failed. Please check the data and try again.');
+      console.error('Import process error:', error);
     }
   });
 
@@ -331,6 +545,7 @@ function DataManagementPage() {
         'Program': programName,
         'Folder': folderName,
         'List': listName,
+        'Course Code': course.course_code || '',
         'Course ID': course.id,
         'Title': course.title,
         'Description': course.description || '',
@@ -371,11 +586,11 @@ function DataManagementPage() {
         'Program *': 'Lockheed Martin',
         'Folder *': 'Course Development',
         'List *': 'Development',
-        'Title *': 'Example Course 1',
-        'Description': 'Course description goes here',
+        'Course Code': 'C-000100',
+        'Title *': 'Example WBT Course',
+        'Description': 'Web-based training course example',
         'Modality': 'WBT',
         'Priority': 'Medium',
-        'Status': 'PREDEVELOPMENT',
         'Start Date': '2024-01-01',
         'Due Date': '2024-03-01',
         'Owner Email': 'owner@example.com',
@@ -385,15 +600,57 @@ function DataManagementPage() {
         'Program *': 'Lockheed Martin',
         'Folder *': 'Course Development',
         'List *': 'Review',
-        'Title *': 'Example Course 2',
-        'Description': 'Another course description',
+        'Course Code': 'C-000101',
+        'Title *': 'Example Instructor-Led Course',
+        'Description': 'Instructor-led or virtual training example',
         'Modality': 'ILT/VLT',
         'Priority': 'High',
-        'Status': 'PRODUCTION',
         'Start Date': '2024-02-01',
         'Due Date': '2024-04-01',
         'Owner Email': 'owner2@example.com',
         'Lead Email': 'lead2@example.com'
+      },
+      {
+        'Program *': 'Lockheed Martin',
+        'Folder *': 'Training Materials',
+        'List *': 'Quick Learning',
+        'Course Code': 'C-000102',
+        'Title *': 'Example Micro Learning Module',
+        'Description': 'Short, focused learning content',
+        'Modality': 'Micro Learning',
+        'Priority': 'Low',
+        'Start Date': '2024-01-15',
+        'Due Date': '2024-02-15',
+        'Owner Email': 'owner3@example.com',
+        'Lead Email': 'lead3@example.com'
+      },
+      {
+        'Program *': 'Lockheed Martin',
+        'Folder *': 'Simulation Training',
+        'List *': 'Development',
+        'Course Code': 'C-000103',
+        'Title *': 'Example Simulation Course',
+        'Description': 'Simulation-based training example',
+        'Modality': 'SIMS',
+        'Priority': 'Critical',
+        'Start Date': '2024-03-01',
+        'Due Date': '2024-06-01',
+        'Owner Email': 'owner4@example.com',
+        'Lead Email': 'lead4@example.com'
+      },
+      {
+        'Program *': 'Lockheed Martin',
+        'Folder *': 'Digital Adoption',
+        'List *': 'In Progress',
+        'Course Code': 'C-000104',
+        'Title *': 'Example DAP Course',
+        'Description': 'Digital adoption platform training',
+        'Modality': 'DAP',
+        'Priority': 'Medium',
+        'Start Date': '2024-02-15',
+        'Due Date': '2024-04-30',
+        'Owner Email': 'owner5@example.com',
+        'Lead Email': 'lead5@example.com'
       }
     ];
     
@@ -411,19 +668,21 @@ function DataManagementPage() {
       ['   - Title: Name of the course'],
       [''],
       ['OPTIONAL FIELDS:'],
+      ['   - Course Code: Custom course identifier (e.g., C-000100). If not provided, will auto-generate'],
       ['   - Description: Course description'],
       ['   - Modality: WBT, ILT/VLT, Micro Learning, SIMS, or DAP'],
       ['   - Priority: Low, Medium, High, or Critical (case-insensitive)'],
-      [`   - Status: ${statusMapping}`],
       ['   - Start Date: Format YYYY-MM-DD'],
       ['   - Due Date: Format YYYY-MM-DD'],
       ['   - Owner Email: Email of the course owner'],
       ['   - Lead Email: Email of the course lead'],
       [''],
       ['NOTES:'],
-      ['1. The system will create new programs, folders, or lists if they don\'t exist'],
-      ['2. Save the file as .xlsx format'],
-      ['3. Upload the file in the import section']
+      ['1. Programs, Folders, and Lists must already exist in the system'],
+      ['2. Courses with missing hierarchy will be skipped'],
+      ['3. All imported courses will start with "pre_development" status'],
+      ['4. Save the file as .xlsx format'],
+      ['5. Upload the file in the import section']
     ];
     
     const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
@@ -505,24 +764,66 @@ function DataManagementPage() {
             priorityValue = priorityValue.toLowerCase();
           }
           
-          coursesToImport.push({
+          // Helper function to convert Excel date numbers to ISO date strings
+          const convertExcelDate = (excelDate) => {
+            if (!excelDate) return null;
+            
+            // If it's already a string in correct format, return it
+            if (typeof excelDate === 'string') {
+              // Check if it's already in YYYY-MM-DD or ISO format
+              if (excelDate.match(/^\d{4}-\d{2}-\d{2}/)) {
+                return excelDate.split('T')[0]; // Return just the date part
+              }
+              return excelDate;
+            }
+            
+            // If it's a number (Excel serial date), convert it
+            if (typeof excelDate === 'number') {
+              // Excel dates start from 1900-01-01 (serial number 1)
+              // JavaScript dates are in milliseconds since 1970-01-01
+              const excelEpoch = new Date(1900, 0, 1);
+              const msPerDay = 24 * 60 * 60 * 1000;
+              
+              // Excel incorrectly considers 1900 as a leap year, so we need to subtract 2 days for dates after Feb 28, 1900
+              const daysSince1900 = excelDate - (excelDate > 60 ? 2 : 1);
+              const jsDate = new Date(excelEpoch.getTime() + daysSince1900 * msPerDay);
+              
+              // Format as YYYY-MM-DD
+              const year = jsDate.getFullYear();
+              const month = String(jsDate.getMonth() + 1).padStart(2, '0');
+              const day = String(jsDate.getDate()).padStart(2, '0');
+              return `${year}-${month}-${day}`;
+            }
+            
+            return null;
+          };
+          
+          // Prepare the course data in the format expected by the backend
+          const courseData = {
             title: title,
+            course_code: row['Course Code'] || null, // Will auto-generate if not provided
             description: row['Description'] || '',
-            modality: row['Modality'] || '',
+            modality: row['Modality'] || 'WBT', // Default to WBT if not specified
             priority: priorityValue,
-            status: statusValue,
-            start_date: row['Start Date'] || null,
-            due_date: row['Due Date'] || null,
-            list_id: list?.id || null,
-            folder_id: folder?.id || null,
-            program_id: program?.id || null,
+            // Don't send status - backend sets it to 'pre_development' automatically
+            startDate: convertExcelDate(row['Start Date']),  // Convert Excel dates
+            dueDate: convertExcelDate(row['Due Date']),      // Convert Excel dates
+            listId: list?.id || null,              // Use camelCase for API - this is required!
+            workflowTemplateId: 1,                 // Default workflow template
             // Store hierarchy names for potential creation
             _hierarchyNames: {
               program: programName,
               folder: folderName,
               list: listName
             }
-          });
+          };
+          
+          // Add deliverables if modality is WBT (required by backend)
+          if (courseData.modality === 'WBT') {
+            courseData.deliverables = [1]; // Default deliverable ID for WBT courses
+          }
+          
+          coursesToImport.push(courseData);
         }
 
         if (coursesToImport.length === 0) {
@@ -660,6 +961,7 @@ function DataManagementPage() {
         <CourseImportTab
           downloadImportTemplate={downloadImportTemplate}
           handleFileImport={handleFileImport}
+          isImporting={importCoursesMutation.isPending}
         />
       )}
 
@@ -1249,7 +1551,8 @@ function CourseExportTab({
 // Course Import Tab Component
 function CourseImportTab({
   downloadImportTemplate,
-  handleFileImport
+  handleFileImport,
+  isImporting = false
 }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -1337,11 +1640,20 @@ function CourseImportTab({
             <div className="flex items-center justify-end">
               <button
                 onClick={() => handleFileImport(selectedFile)}
-                disabled={!selectedFile}
+                disabled={!selectedFile || isImporting}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Upload className="h-4 w-4 mr-2" />
-                Import Courses
+                {isImporting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import Courses
+                  </>
+                )}
               </button>
             </div>
           </div>

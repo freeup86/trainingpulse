@@ -333,6 +333,9 @@ export default function CourseDetailPage() {
           </Button>
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              {course.course_code && (
+                <span className="text-gray-500 dark:text-gray-400 mr-3">{course.course_code}</span>
+              )}
               {course.title}
             </h1>
             <p className="text-gray-600 dark:text-gray-400 mt-1">
@@ -359,6 +362,13 @@ export default function CourseDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
+                {course.course_code && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Course Code</h4>
+                    <p className="text-gray-700 dark:text-gray-300 font-mono">{course.course_code}</p>
+                  </div>
+                )}
+                
                 {course.description && (
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Description</h4>
@@ -707,8 +717,8 @@ export default function CourseDetailPage() {
             </CardContent>
           </Card> */}
 
-          {/* Time Tracking Section */}
-          <Card>
+          {/* Time Tracking Section - Hidden for now */}
+          {/* <Card>
             <CardHeader>
               <div className="flex items-center space-x-2">
                 <Timer className="h-5 w-5 text-gray-600 dark:text-gray-300" />
@@ -724,7 +734,7 @@ export default function CourseDetailPage() {
                 courseId={parseInt(id)}
               />
             </CardContent>
-          </Card>
+          </Card> */}
 
           {/* Custom Fields Section - Hidden */}
           {/* <Card>
@@ -747,45 +757,6 @@ export default function CourseDetailPage() {
             </CardContent>
           </Card> */}
 
-          {/* Comments Section */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center space-x-2">
-                <MessageSquare className="h-5 w-5 text-gray-600 dark:text-gray-300" />
-                <CardTitle>Comments & Discussion</CardTitle>
-              </div>
-              <CardDescription>
-                Collaborate and discuss course details
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Comments
-                entityType="course"
-                entityId={parseInt(id)}
-              />
-            </CardContent>
-          </Card>
-
-          {/* Activity Feed Section */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center space-x-2">
-                <Activity className="h-5 w-5 text-gray-600 dark:text-gray-300" />
-                <CardTitle>Activity History</CardTitle>
-              </div>
-              <CardDescription>
-                Recent changes and updates
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ActivityFeed
-                entityType="course"
-                entityId={parseInt(id)}
-                showFilters={false}
-                compact={true}
-              />
-            </CardContent>
-          </Card>
         </div>
 
         {/* Sidebar */}
@@ -865,6 +836,46 @@ export default function CourseDetailPage() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Comments Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <MessageSquare className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Comments & Discussion</CardTitle>
+              </div>
+              <CardDescription>
+                Collaborate and discuss course details
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Comments
+                entityType="course"
+                entityId={parseInt(id)}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Activity Feed Section */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <Activity className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Activity History</CardTitle>
+              </div>
+              <CardDescription>
+                Recent changes and updates
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ActivityFeed
+                entityType="course"
+                entityId={parseInt(id)}
+                showFilters={false}
+                compact={true}
+              />
             </CardContent>
           </Card>
 

@@ -34,6 +34,7 @@ const statusRoutes = require('./routes/statusRoutes');
 const roleRoutes = require('./routes/roleRoutes');
 const phaseStatusRoutes = require('./routes/phaseStatusRoutes');
 const permissionRoutes = require('./routes/permissionRoutes');
+const priorityRoutes = require('./routes/priorityRoutes');
 const userPermissionRoutes = require('./routes/userPermissionRoutes');
 const modalityRoutes = require('./routes/modalityRoutes');
 const programRoutes = require('./routes/programRoutes');
@@ -191,6 +192,7 @@ app.use(`/api/${API_VERSION}/notifications`, authenticate, authenticatedLimiter,
 app.use(`/api/${API_VERSION}/settings`, authenticate, authenticatedLimiter, settingsRoutes);
 app.use(`/api/${API_VERSION}/statuses`, authenticate, statusLimiter, statusRoutes);
 app.use(`/api/${API_VERSION}/phase-statuses`, authenticate, statusLimiter, phaseStatusRoutes);
+app.use(`/api/${API_VERSION}/priorities`, authenticate, statusLimiter, priorityRoutes);
 app.use(`/api/${API_VERSION}/roles`, authenticate, authenticatedLimiter, roleRoutes);
 app.use(`/api/${API_VERSION}/permissions`, authenticate, authenticatedLimiter, permissionRoutes);
 app.use(`/api/${API_VERSION}/user-permissions`, authenticate, authenticatedLimiter, userPermissionRoutes);
@@ -325,8 +327,10 @@ async function startServer() {
 }
 
 // Start the server
-if (require.main === module) {
-  startServer();
-}
+// Start server when file is executed directly
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
 
 module.exports = app;

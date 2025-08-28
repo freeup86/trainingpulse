@@ -23,13 +23,16 @@ import {
   UserCheck,
   ListTodo,
   Layers,
-  Building
+  Building,
+  Flag,
+  AlertCircle,
+  Star
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
-import { statuses, users, roles, permissions, phaseStatuses, modalityTasks } from '../lib/api';
+import { statuses, users, roles, permissions, phaseStatuses, modalityTasks, priorities } from '../lib/api';
 import Breadcrumb from '../components/navigation/Breadcrumb';
 import ProgramsTab from '../components/admin/ProgramsTab';
 import CustomFieldsTab from '../components/admin/CustomFieldsTab';
@@ -51,6 +54,15 @@ const STATUS_COLORS = {
   'on_hold': 'text-yellow-500 dark:text-yellow-400',
   'cancelled': 'text-red-500 dark:text-red-400',
   'completed': 'text-blue-500 dark:text-blue-400'
+};
+
+// Priority icons mapping
+const PRIORITY_ICONS = {
+  'Flag': Flag,
+  'AlertCircle': AlertCircle,
+  'AlertTriangle': AlertTriangle,
+  'Star': Star,
+  'Circle': Circle
 };
 
 
@@ -95,6 +107,17 @@ export default function AdminPage() {
     isActive: true
   });
   const [showPassword, setShowPassword] = useState(false);
+
+  // Priority management state
+  const [editingPriority, setEditingPriority] = useState(null);
+  const [isCreatingPriority, setIsCreatingPriority] = useState(false);
+  const [priorityFormData, setPriorityFormData] = useState({
+    value: '',
+    label: '',
+    icon: 'Flag',
+    color: 'text-gray-500 dark:text-gray-400',
+    sort_order: 0
+  });
 
   // Phase status management state
   const [editingPhaseStatus, setEditingPhaseStatus] = useState(null);
@@ -187,6 +210,59 @@ export default function AdminPage() {
     }
   });
 
+  // Priority queries and mutations
+  const { data: prioritiesData, isLoading: prioritiesLoading, error: prioritiesError } = useQuery({
+    queryKey: ['admin-priorities'],
+    queryFn: async () => {
+      const response = await priorities.getAll();
+      return response.data;
+    }
+  });
+
+  const createPriorityMutation = useMutation({
+    mutationFn: async (priorityData) => {
+      const response = await priorities.create(priorityData);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-priorities']);
+      toast.success('Priority created successfully');
+      resetPriorityForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to create priority: ' + (error.response?.data?.error?.message || error.message));
+    }
+  });
+
+  const updatePriorityMutation = useMutation({
+    mutationFn: async ({ id, data }) => {
+      const response = await priorities.update(id, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-priorities']);
+      toast.success('Priority updated successfully');
+      resetPriorityForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to update priority: ' + (error.response?.data?.error?.message || error.message));
+    }
+  });
+
+  const deletePriorityMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await priorities.delete(id);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-priorities']);
+      toast.success('Priority deleted successfully');
+    },
+    onError: (error) => {
+      toast.error('Failed to delete priority: ' + (error.response?.data?.error?.message || error.message));
+    }
+  });
+
   // Phase Status queries and mutations
   const { data: phaseStatusesData, isLoading: phaseStatusesLoading, error: phaseStatusesError } = useQuery({
     queryKey: ['admin-phase-statuses'],
@@ -255,6 +331,66 @@ export default function AdminPage() {
     });
     setEditingStatus(null);
     setIsCreating(false);
+  };
+
+  // Priority management handlers
+  const handleCreatePriority = () => {
+    setEditingPriority(null);
+    setPriorityFormData({
+      value: '',
+      label: '',
+      icon: 'Flag',
+      color: 'text-gray-500 dark:text-gray-400',
+      sort_order: 0
+    });
+    setIsCreatingPriority(true);
+  };
+
+  const handleEditPriority = (priority) => {
+    setEditingPriority(priority);
+    setPriorityFormData({
+      value: priority.value,
+      label: priority.label,
+      icon: priority.icon || 'Flag',
+      color: priority.color || 'text-gray-500 dark:text-gray-400',
+      sort_order: priority.sort_order || 0
+    });
+    setIsCreatingPriority(false);
+  };
+
+  const handleSubmitPriority = (e) => {
+    e.preventDefault();
+    if (editingPriority) {
+      updatePriorityMutation.mutate({
+        id: editingPriority.id,
+        data: {
+          label: priorityFormData.label,
+          icon: priorityFormData.icon,
+          color: priorityFormData.color,
+          sort_order: priorityFormData.sort_order
+        }
+      });
+    } else {
+      createPriorityMutation.mutate(priorityFormData);
+    }
+  };
+
+  const handleDeletePriority = (priority) => {
+    if (window.confirm(`Are you sure you want to delete the priority "${priority.label}"?`)) {
+      deletePriorityMutation.mutate(priority.id);
+    }
+  };
+
+  const resetPriorityForm = () => {
+    setPriorityFormData({
+      value: '',
+      label: '',
+      icon: 'Flag',
+      color: 'text-gray-500 dark:text-gray-400',
+      sort_order: 0
+    });
+    setEditingPriority(null);
+    setIsCreatingPriority(false);
   };
 
   const resetPhaseStatusForm = () => {
@@ -697,6 +833,7 @@ export default function AdminPage() {
   }
 
   const statusesList = statusesData?.data || statusesData || [];
+  const prioritiesList = prioritiesData?.data || prioritiesData || [];
   const usersList = usersData?.users || [];
 
   return (
@@ -754,6 +891,19 @@ export default function AdminPage() {
             >
               <ListTodo className="h-4 w-4 mr-2" />
               Phase Statuses
+            </button>
+          )}
+          {can.manageSettings && (
+            <button
+              onClick={() => setActiveTab('priorities')}
+              className={`${
+                activeTab === 'priorities'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+              } whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center`}
+            >
+              <Flag className="h-4 w-4 mr-2" />
+              Priorities
             </button>
           )}
           {can.manageSettings && (
@@ -1459,6 +1609,172 @@ export default function AdminPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'priorities' && can.manageSettings && (
+        /* Priority Management */
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center">
+                  <Flag className="h-5 w-5 mr-2" />
+                  Priority Values
+                </CardTitle>
+                <CardDescription>
+                  Manage the available priority levels for courses
+                </CardDescription>
+              </div>
+              <Button onClick={handleCreatePriority} disabled={prioritiesLoading || createPriorityMutation.isLoading || updatePriorityMutation.isLoading}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Priority
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Create/Edit Form */}
+            {(isCreatingPriority || editingPriority) && (
+              <form onSubmit={handleSubmitPriority} className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Value *
+                    </label>
+                    <input
+                      type="text"
+                      value={priorityFormData.value}
+                      onChange={(e) => setPriorityFormData({ ...priorityFormData, value: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="e.g., low"
+                      required
+                      disabled={editingPriority}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Internal value (lowercase, no spaces)</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Label *
+                    </label>
+                    <input
+                      type="text"
+                      value={priorityFormData.label}
+                      onChange={(e) => setPriorityFormData({ ...priorityFormData, label: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="e.g., Low"
+                      required
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Display name shown to users</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Icon
+                    </label>
+                    <select
+                      value={priorityFormData.icon}
+                      onChange={(e) => setPriorityFormData({ ...priorityFormData, icon: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="Flag">Flag</option>
+                      <option value="AlertCircle">Alert Circle</option>
+                      <option value="AlertTriangle">Alert Triangle</option>
+                      <option value="Star">Star</option>
+                      <option value="Circle">Circle</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Color
+                    </label>
+                    <select
+                      value={priorityFormData.color}
+                      onChange={(e) => setPriorityFormData({ ...priorityFormData, color: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="text-gray-500 dark:text-gray-400">Gray</option>
+                      <option value="text-blue-500 dark:text-blue-400">Blue</option>
+                      <option value="text-green-500 dark:text-green-400">Green</option>
+                      <option value="text-yellow-500 dark:text-yellow-400">Yellow</option>
+                      <option value="text-orange-500 dark:text-orange-400">Orange</option>
+                      <option value="text-red-500 dark:text-red-400">Red</option>
+                      <option value="text-purple-500 dark:text-purple-400">Purple</option>
+                      <option value="text-pink-500 dark:text-pink-400">Pink</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Sort Order
+                    </label>
+                    <input
+                      type="number"
+                      value={priorityFormData.sort_order}
+                      onChange={(e) => setPriorityFormData({ ...priorityFormData, sort_order: parseInt(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="0"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Lower numbers appear first</p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end space-x-2">
+                  <Button type="button" variant="outline" onClick={resetPriorityForm}>
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={createPriorityMutation.isLoading || updatePriorityMutation.isLoading}>
+                    <Save className="h-4 w-4 mr-2" />
+                    {editingPriority ? 'Update' : 'Create'} Priority
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {/* Priority List */}
+            <div className="space-y-2">
+              {prioritiesList.map((priority) => {
+                const IconComponent = PRIORITY_ICONS[priority.icon] || Flag;
+                return (
+                  <div key={priority.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <div className="flex items-center space-x-3">
+                      <IconComponent className={`h-5 w-5 ${priority.color}`} />
+                      <div>
+                        <span className="font-medium text-gray-900 dark:text-white">{priority.label}</span>
+                        <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">({priority.value})</span>
+                        {priority.is_default && (
+                          <span className="ml-2 px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded">Default</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleEditPriority(priority)}
+                        disabled={deletePriorityMutation.isLoading}
+                        className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                      </button>
+                      <button
+                        onClick={() => handleDeletePriority(priority)}
+                        disabled={deletePriorityMutation.isLoading}
+                        className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {prioritiesList.length === 0 && (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <Flag className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No priority values configured</p>
+                <p className="text-sm">Click "Add Priority" to create your first priority level</p>
               </div>
             )}
           </CardContent>

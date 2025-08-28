@@ -6,26 +6,62 @@ const NotificationService = require('../services/NotificationService');
 const { asyncHandler, ValidationError, NotFoundError, AuthorizationError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
-// Validation schemas
+// Create dynamic validation schemas with valid priorities
+const createDynamicCourseSchema = async () => {
+  const { getValidPriorityValues } = require('./priorityController');
+  const validPriorities = await getValidPriorityValues();
+  
+  return Joi.object({
+    title: Joi.string().min(3).max(255).required().trim(),
+    course_code: Joi.string().max(20).optional().allow(null, '').trim(), // Optional course code
+    description: Joi.string().max(2000).optional().allow(''),
+    modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
+    listId: Joi.string().uuid().required(),
+    deliverables: Joi.when('modality', {
+      is: 'WBT',
+      then: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
+      otherwise: Joi.array().items(Joi.number().integer().positive()).optional()
+    }),
+    priority: Joi.string().valid(...validPriorities).default('medium'),
+    ownerId: Joi.number().integer().positive().optional(),
+    startDate: Joi.date().optional(),
+    dueDate: Joi.date().optional().allow('').when('startDate', {
+      is: Joi.exist(),
+      then: Joi.date().min(Joi.ref('startDate')),
+      otherwise: Joi.date()
+    }),
+    estimatedHours: Joi.number().integer().min(1).max(1000).optional(),
+    estimatedDailyHours: Joi.number().precision(2).min(0.5).max(16).optional(),
+    workflowTemplateId: Joi.number().integer().positive().required(),
+    metadata: Joi.object().max(20).optional(),
+    assignments: Joi.array().items(
+      Joi.object({
+        userId: Joi.number().integer().positive().required(),
+        role: Joi.string().valid('owner', 'designer', 'reviewer', 'approver', 'sme').required()
+      })
+    ).optional()
+  });
+};
+
+// Keep static schemas for backwards compatibility
 const createCourseSchema = Joi.object({
   title: Joi.string().min(3).max(255).required().trim(),
+  course_code: Joi.string().max(20).optional().allow(null, '').trim(),
   description: Joi.string().max(2000).optional().allow(''),
   modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
   listId: Joi.string().uuid().required(),
-  deliverables: Joi.array().items(
-    Joi.number().integer().positive()
-  ).optional().when('modality', {
+  deliverables: Joi.when('modality', {
     is: 'WBT',
-    then: Joi.array().min(1).required(),
-    otherwise: Joi.optional()
+    then: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
+    otherwise: Joi.array().items(Joi.number().integer().positive()).optional()
   }),
-  priority: Joi.string().valid('low', 'medium', 'high', 'critical').default('medium'),
+  priority: Joi.string().optional(), // Will be validated dynamically
   ownerId: Joi.number().integer().positive().optional(),
-  startDate: Joi.date().optional(),
-  dueDate: Joi.date().optional().allow('').when('startDate', {
+  startDate: Joi.date().optional().allow(null),
+  dueDate: Joi.date().optional().allow('', null).when('startDate', {
     is: Joi.exist(),
-    then: Joi.date().min(Joi.ref('startDate')),
-    otherwise: Joi.date()
+    then: Joi.date().min(Joi.ref('startDate')).allow(null),
+    otherwise: Joi.date().allow(null)
   }),
   estimatedHours: Joi.number().integer().min(1).max(1000).optional(),
   estimatedDailyHours: Joi.number().precision(2).min(0.5).max(16).optional(),
@@ -44,7 +80,7 @@ const updateCourseSchema = Joi.object({
   description: Joi.string().max(2000).optional().allow(''),
   modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').optional(),
   deliverables: Joi.array().items(Joi.number().integer().positive()).optional(),
-  priority: Joi.string().valid('low', 'medium', 'high', 'critical').optional(),
+  priority: Joi.string().optional(), // Dynamic validation done in updateCourse method
   status: Joi.string().max(50).optional(),
   ownerId: Joi.number().integer().positive().optional(),
   startDate: Joi.date().optional(),
@@ -300,9 +336,50 @@ class CourseController {
    * POST /courses - Create new course
    */
   createCourse = asyncHandler(async (req, res) => {
+    // Validate priority if provided
+    if (req.body.priority) {
+      try {
+        const { getValidPriorityValues } = require('./priorityController');
+        const validPriorities = await getValidPriorityValues();
+        console.log('Valid priorities from DB:', validPriorities);
+        console.log('Received priority:', req.body.priority);
+        
+        if (!validPriorities.includes(req.body.priority.toLowerCase())) {
+          console.log('Priority validation failed:', req.body.priority, 'not in', validPriorities);
+          throw new ValidationError('Invalid course data', [{
+            message: `"priority" must be one of [${validPriorities.join(', ')}]`,
+            path: ['priority'],
+            type: 'any.only'
+          }]);
+        }
+        // Ensure priority is lowercase
+        req.body.priority = req.body.priority.toLowerCase();
+      } catch (error) {
+        console.error('Error during priority validation:', error);
+        if (error.name === 'ValidationError') {
+          throw error;
+        }
+        // If there's an error getting priorities, use a fallback list
+        const fallbackPriorities = ['low', 'medium', 'high', 'critical', 'urgent'];
+        if (!fallbackPriorities.includes(req.body.priority.toLowerCase())) {
+          throw new ValidationError('Invalid course data', [{
+            message: `"priority" must be one of [${fallbackPriorities.join(', ')}]`,
+            path: ['priority'],
+            type: 'any.only'
+          }]);
+        }
+        req.body.priority = req.body.priority.toLowerCase();
+      }
+    }
+    
     // Validate input
     const { error, value } = createCourseSchema.validate(req.body);
     if (error) {
+      console.log('=== Joi validation error ===');
+      console.log('Error details:', JSON.stringify(error.details, null, 2));
+      console.log('Failed course data:', JSON.stringify(req.body, null, 2));
+      console.log('Error message:', error.message);
+      console.log('===========================');
       throw new ValidationError('Invalid course data', error.details);
     }
 
@@ -360,13 +437,13 @@ class CourseController {
       // Create course with program_id and folder_id from the list lookup
       const courseResult = await client.query(`
         INSERT INTO courses (
-          title, description, modality, list_id, folder_id, program_id, type, priority, status, owner_id, start_date, due_date,
+          title, course_code, description, modality, list_id, folder_id, program_id, type, priority, status, owner_id, start_date, due_date,
           estimated_hours, estimated_daily_hours, metadata, created_by, updated_by,
           created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'standard', $7, 'pre_development', $8, $9, $10, $11, $12, $13, $14, $14, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'standard', $8, 'pre_development', $9, $10, $11, $12, $13, $14, $15, $15, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
       `, [
-        title, description, modality, listId, listInfo.folder_id, listInfo.program_id, priority, ownerId || req.user.id, startDate, dueDate,
+        title, value.course_code || null, description, modality, listId, listInfo.folder_id, listInfo.program_id, priority, ownerId || req.user.id, startDate, dueDate,
         estimatedHours, estimatedDailyHours, JSON.stringify(metadata || {}),
         req.user.id
       ]);
@@ -743,6 +820,21 @@ class CourseController {
    */
   updateCourse = asyncHandler(async (req, res) => {
     const { id } = req.params;
+
+    // Validate priority if provided (before general validation)
+    if (req.body.priority) {
+      const { getValidPriorityValues } = require('./priorityController');
+      const validPriorities = await getValidPriorityValues();
+      if (!validPriorities.includes(req.body.priority.toLowerCase())) {
+        throw new ValidationError('Invalid course data', [{
+          message: `"priority" must be one of [${validPriorities.join(', ')}]`,
+          path: ['priority'],
+          type: 'any.only'
+        }]);
+      }
+      // Ensure priority is lowercase
+      req.body.priority = req.body.priority.toLowerCase();
+    }
 
     // Validate input
     const { error, value } = updateCourseSchema.validate(req.body);
