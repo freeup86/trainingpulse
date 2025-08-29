@@ -116,8 +116,7 @@ function App() {
                   >
                     <Route index element={<Navigate to="/dashboard" replace />} />
                     <Route path="dashboard" element={<DashboardPage />} />
-                    <Route path="courses" element={<Navigate to="/programs" replace />} />
-                    <Route path="courses-new" element={<CoursesPageNew />} />
+                    <Route path="courses" element={<CoursesPageNew />} />
                     <Route path="courses/create" element={<CreateCoursePage />} />
                     <Route path="courses/:id" element={<CourseDetailPage />} />
                     <Route path="courses/:id/edit" element={<EditCoursePage />} />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
@@ -25,11 +25,17 @@ import {
   X,
   MoreHorizontal,
   Copy,
-  RefreshCw
+  RefreshCw,
+  ChevronsUpDown,
+  User,
+  MoreVertical,
+  XCircle,
+  AlertCircle,
+  Minus
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { courses, statuses, phaseStatuses, users, modalityTasks, programs, lists } from '../lib/api';
-import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
+import { formatDate, getStatusColor, getPriorityColor, getModalityColor } from '../lib/utils';
 import Breadcrumb, { useBreadcrumbs } from '../components/navigation/Breadcrumb';
 
 // Independent status definitions (separate from workflow)
@@ -218,19 +224,25 @@ function CoursesPage() {
     const saved = localStorage.getItem('coursesGroupBy');
     return saved || '';
   }); // '' for no grouping, 'status' for grouping by status
-  const [filters, setFilters] = useState({
-    priority: '',
-    modality: '',
-    status: ''
-  });
+  const [filters, setFilters] = useState({});
   const [showDropdown, setShowDropdown] = useState(null);
   const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
+  
+  // Sorting state
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  
+  // Column filters state - stores selected values for each column
+  const [columnFilters, setColumnFilters] = useState({});
+  const [showFilterInputs, setShowFilterInputs] = useState({});
+  const [filterDropdownPositions, setFilterDropdownPositions] = useState({});
+  const [columnCheckStates, setColumnCheckStates] = useState({}); // Track checkbox visual state separately
 
   // Setup resizable columns with minimum widths to prevent header overflow
   const tableColumns = [
     { name: 'Course', defaultWidth: 500, minWidth: 250 },
     { name: 'Progress', defaultWidth: 170, minWidth: 90 },
     { name: 'Modality', defaultWidth: 160, minWidth: 85 },
+    { name: 'Priority', defaultWidth: 150, minWidth: 80 },
     { name: 'Start Date', defaultWidth: 160, minWidth: 100 },
     { name: 'Due Date', defaultWidth: 160, minWidth: 90 },
     { name: 'Lead', defaultWidth: 150, minWidth: 60 },
@@ -242,6 +254,7 @@ function CoursesPage() {
     { name: 'Status', defaultWidth: 200, minWidth: 100 },
     { name: 'Progress', defaultWidth: 170, minWidth: 90 },
     { name: 'Modality', defaultWidth: 160, minWidth: 85 },
+    { name: 'Priority', defaultWidth: 150, minWidth: 80 },
     { name: 'Start Date', defaultWidth: 160, minWidth: 100 },
     { name: 'Due Date', defaultWidth: 160, minWidth: 90 },
     { name: 'Lead', defaultWidth: 150, minWidth: 60 },
@@ -261,6 +274,490 @@ function CoursesPage() {
   const totalTableWidth = currentColumns.reduce((sum, col, index) => {
     return sum + (columnWidths[index] || col.defaultWidth || 150);
   }, 0);
+  
+  // Sorting function
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+  
+  // Filter function
+  const handleColumnFilter = (columnKey, value) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [columnKey]: value
+    }));
+  };
+  
+  // Toggle filter input visibility
+  const toggleFilterInput = (columnKey, buttonElement) => {
+    const isCurrentlyOpen = showFilterInputs[columnKey];
+    
+    if (!isCurrentlyOpen && buttonElement) {
+      // Calculate position when opening
+      const position = calculateFilterDropdownPosition(buttonElement);
+      setFilterDropdownPositions(prev => ({
+        ...prev,
+        [columnKey]: position
+      }));
+    }
+    
+    setShowFilterInputs(prev => ({
+      ...prev,
+      [columnKey]: !prev[columnKey]
+    }));
+  };
+  
+  // Get distinct values for a column
+  const getDistinctValues = (columnKey, courses) => {
+    const values = new Set();
+    courses.forEach(course => {
+      let value;
+      switch (columnKey) {
+        case 'course':
+          value = course.title;
+          break;
+        case 'status':
+          value = course.status;
+          break;
+        case 'progress':
+          const subtasks = course.subtasks || [];
+          const progress = subtasks.length > 0 && phaseStatusesData 
+            ? calculateProgress(subtasks, phaseStatusesData, null, course.modality)
+            : 0;
+          value = `${Math.round(progress)}%`;
+          break;
+        case 'modality':
+          value = course.modality;
+          break;
+        case 'priority':
+          value = course.priority;
+          break;
+        case 'start_date':
+          value = course.start_date ? formatDate(course.start_date) : 'Not set';
+          break;
+        case 'due_date':
+          value = course.due_date ? formatDate(course.due_date) : 'Not set';
+          break;
+        case 'lead':
+          value = course.owner?.name || 'Unassigned';
+          break;
+        default:
+          value = null;
+      }
+      if (value !== null && value !== undefined) {
+        values.add(value);
+      }
+    });
+    return Array.from(values).sort();
+  };
+  
+  // Handle checkbox filter change
+  const handleCheckboxFilter = (columnKey, value, checked, allCourses, filteredCourses) => {
+    const distinctValues = getDistinctValues(columnKey, allCourses);
+    const checkState = columnCheckStates[columnKey];
+    const currentFilter = columnFilters[columnKey];
+    
+    // Get available values in the filtered context (what's actually shown in the dropdown)
+    const availableValues = filteredCourses ? getDistinctValues(columnKey, filteredCourses) : distinctValues;
+    
+    // Clear the 'none' state when user interacts with individual checkboxes
+    if (checkState === 'none') {
+      setColumnCheckStates(prev => {
+        const { [columnKey]: _, ...rest } = prev;
+        return rest;
+      });
+    }
+    
+    // Build the new filter based on current state
+    let newFilter;
+    
+    if (!currentFilter && checkState !== 'none') {
+      // No filter exists and not in 'none' state - all are shown
+      if (checked) {
+        return; // Already checked, no change
+      } else {
+        // Uncheck this one item
+        // If we're in a filtered context and unchecking the only available value, 
+        // we should clear the filter rather than create one
+        if (availableValues.length === 1 && availableValues[0] === value) {
+          newFilter = []; // This will trigger the "no values selected" case below
+        } else {
+          // Show all available values except this one
+          newFilter = availableValues.filter(v => v !== value);
+        }
+      }
+    } else if (checkState === 'none') {
+      // We're in 'none' state - build filter from scratch
+      if (checked) {
+        newFilter = [value]; // Start with just this value
+      } else {
+        return; // Already unchecked, no change
+      }
+    } else if (currentFilter) {
+      // Filter exists - add or remove value
+      if (checked) {
+        if (!currentFilter.includes(value)) {
+          newFilter = [...currentFilter, value];
+        } else {
+          return; // Already in filter
+        }
+      } else {
+        newFilter = currentFilter.filter(v => v !== value);
+      }
+    } else {
+      // No filter, not in 'none' state
+      if (checked) {
+        return; // All shown, item already checked
+      } else {
+        // Uncheck one item
+        // Use available values in filtered context
+        if (availableValues.length === 1 && availableValues[0] === value) {
+          newFilter = []; // This will trigger the "no values selected" case below
+        } else {
+          newFilter = availableValues.filter(v => v !== value);
+        }
+      }
+    }
+    
+    // If all values are selected, remove filter (show all)
+    if (newFilter && newFilter.length === distinctValues.length) {
+      setColumnFilters(prev => {
+        const { [columnKey]: _, ...rest } = prev;
+        return rest;
+      });
+      return;
+    }
+    
+    // If no values selected after this change, always show all data with unchecked boxes
+    // This handles both unchecking the last value and unchecking the only available value
+    if (newFilter && newFilter.length === 0) {
+      // Set visual state to 'none' to show unchecked boxes
+      setColumnCheckStates(prev => ({
+        ...prev,
+        [columnKey]: 'none'
+      }));
+      // Remove filter to show all data
+      setColumnFilters(prev => {
+        const { [columnKey]: _, ...rest } = prev;
+        return rest;
+      });
+      return;
+    }
+    
+    // Normal case - update filter
+    setColumnFilters(prev => ({
+      ...prev,
+      [columnKey]: newFilter
+    }));
+  };
+  
+  // Select/deselect all for a column
+  const handleSelectAll = (columnKey, distinctValues, selectAll) => {
+    setColumnFilters(prev => {
+      if (selectAll) {
+        // Remove filter to show all
+        const { [columnKey]: _, ...rest } = prev;
+        return rest;
+      } else {
+        // Set empty array to show none
+        return {
+          ...prev,
+          [columnKey]: []
+        };
+      }
+    });
+  };
+  
+  // Create sortable/filterable header component
+  const TableHeader = ({ columnKey, columnName, columnIndex, showFilter = true, allCourses, filteredCourses }) => {
+    const showFilterInput = showFilterInputs[columnKey] || false;
+    const selectedValues = columnFilters[columnKey] || [];
+    const filterRef = useRef(null);
+    const selectAllRef = useRef(null);
+    const dropdownPosition = filterDropdownPositions[columnKey] || { top: 0, left: 0 };
+    
+    // Get distinct values from filtered courses (excluding this column's filter)
+    // This shows only values that are available with other filters applied
+    const getFilteredDistinctValues = () => {
+      // Start with filtered courses or all courses if no filtering done yet
+      let coursesToCheck = filteredCourses || allCourses || [];
+      
+      // If this column has a filter, we need to use all courses to get all possible values for this column
+      // But still respect other column filters
+      if (columnFilters[columnKey] && columnFilters[columnKey].length > 0) {
+        // Re-apply all filters except this column's filter
+        coursesToCheck = allCourses || [];
+        Object.entries(columnFilters).forEach(([filterKey, filterValues]) => {
+          if (filterKey !== columnKey && filterValues && filterValues.length > 0) {
+            coursesToCheck = coursesToCheck.filter(course => {
+              let value;
+              switch (filterKey) {
+                case 'course':
+                  value = course.title;
+                  break;
+                case 'status':
+                  value = course.status;
+                  break;
+                case 'modality':
+                  value = course.modality;
+                  break;
+                case 'priority':
+                  value = course.priority;
+                  break;
+                case 'start_date':
+                  value = course.start_date ? formatDate(course.start_date) : 'Not set';
+                  break;
+                case 'due_date':
+                  value = course.due_date ? formatDate(course.due_date) : 'Not set';
+                  break;
+                case 'lead':
+                  value = course.owner?.name;
+                  break;
+                default:
+                  value = '';
+              }
+              return filterValues.includes(value);
+            });
+          }
+        });
+      }
+      
+      return getDistinctValues(columnKey, coursesToCheck);
+    };
+    
+    const distinctValues = getFilteredDistinctValues();
+    // Check if column has an active filter
+    // A filter is active if:
+    // 1. There's a filter set for this column AND
+    // 2. It's not selecting all values from the original unfiltered data
+    const allDistinctValues = allCourses && allCourses.length > 0 
+      ? getDistinctValues(columnKey, allCourses)
+      : [];
+    const hasActiveFilter = columnFilters[columnKey] && 
+                           selectedValues.length > 0 && 
+                           selectedValues.length < allDistinctValues.length;
+    
+    // Calculate checkbox state for Select All
+    const getSelectAllState = () => {
+      const checkState = columnCheckStates[columnKey];
+      
+      // If explicitly set to unchecked all
+      if (checkState === 'none') {
+        return { checked: false, indeterminate: false };
+      }
+      
+      if (!columnFilters[columnKey]) {
+        // No filter = all selected by default
+        return { checked: true, indeterminate: false };
+      }
+      
+      const checkedCount = selectedValues.length;
+      if (checkedCount === 0) {
+        return { checked: false, indeterminate: false };
+      } else if (checkedCount === distinctValues.length) {
+        return { checked: true, indeterminate: false };
+      } else {
+        return { checked: false, indeterminate: true };
+      }
+    };
+    
+    const selectAllState = getSelectAllState();
+    
+    // Update indeterminate state
+    useEffect(() => {
+      if (selectAllRef.current) {
+        selectAllRef.current.indeterminate = selectAllState.indeterminate;
+      }
+    }, [selectAllState.indeterminate]);
+    
+    // Click outside handler
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (filterRef.current && !filterRef.current.contains(event.target)) {
+          // Close the filter dropdown
+          setShowFilterInputs(prev => ({
+            ...prev,
+            [columnKey]: false
+          }));
+        }
+      };
+      
+      if (showFilterInput) {
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+          document.removeEventListener('mousedown', handleClickOutside);
+        };
+      }
+    }, [showFilterInput, columnKey]);
+    
+    return (
+      <th scope="col" className={`relative px-6 py-1 text-left text-xs font-medium uppercase tracking-wider overflow-visible ${
+        hasActiveFilter 
+          ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-900 dark:text-blue-100 border-b-2 border-blue-500' 
+          : 'text-gray-900 dark:text-white'
+      }`}>
+        <div className="flex items-center gap-1">
+          {/* Column name with sort */}
+          <button
+            onClick={() => handleSort(columnKey)}
+            className={`flex items-center gap-1 transition-colors ${
+              hasActiveFilter 
+                ? 'text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100' 
+                : 'hover:text-blue-600 dark:hover:text-blue-400'
+            }`}
+            title={`Sort by ${columnName}`}
+          >
+            <span className="truncate">
+              {columnName}
+              {hasActiveFilter && (
+                <span className="ml-1 text-xs font-normal text-blue-600 dark:text-blue-400">
+                  ({selectedValues.length})
+                </span>
+              )}
+            </span>
+            {sortConfig.key === columnKey ? (
+              sortConfig.direction === 'asc' ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )
+            ) : (
+              <ChevronsUpDown className="h-3 w-3 text-gray-400" />
+            )}
+          </button>
+          
+          {/* Filter button */}
+          {showFilter && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleFilterInput(columnKey, e.currentTarget);
+              }}
+              className={`p-0.5 rounded transition-all ${
+                hasActiveFilter 
+                  ? 'bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-700 ring-2 ring-blue-400 ring-offset-1' 
+                  : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+              title={`Filter ${columnName}${hasActiveFilter ? ` (${selectedValues.length} selected)` : ''}`}
+            >
+              <Filter className={`${hasActiveFilter ? 'h-4 w-4' : 'h-3 w-3'}`} />
+            </button>
+          )}
+        </div>
+        
+        {/* Filter dropdown with checkboxes */}
+        {showFilter && showFilterInput && (
+          <div 
+            ref={filterRef}
+            className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 min-w-[200px] max-w-[300px]"
+            style={{ 
+              zIndex: 9999,
+              top: `${dropdownPosition.top}px`,
+              left: `${dropdownPosition.left}px`
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Filter by {columnName}
+                  {hasActiveFilter && (
+                    <span className="ml-1 text-blue-600 dark:text-blue-400">
+                      ({selectedValues.length} of {distinctValues.length})
+                    </span>
+                  )}
+                </span>
+                <button
+                  onClick={() => toggleFilterInput(columnKey, null)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              <label className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer">
+                <div className="relative inline-block">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={selectAllState.checked}
+                    onChange={(e) => {
+                      if (selectAllState.checked && !selectAllState.indeterminate) {
+                        // All are selected -> unselect all visually but keep showing all data
+                        setColumnCheckStates(prev => ({
+                          ...prev,
+                          [columnKey]: 'none'
+                        }));
+                        // Remove filter to keep showing all
+                        setColumnFilters(prev => {
+                          const { [columnKey]: _, ...rest } = prev;
+                          return rest;
+                        });
+                      } else {
+                        // Some or none are selected -> select all
+                        setColumnCheckStates(prev => ({
+                          ...prev,
+                          [columnKey]: 'all'
+                        }));
+                        // Remove filter to show all
+                        setColumnFilters(prev => {
+                          const { [columnKey]: _, ...rest } = prev;
+                          return rest;
+                        });
+                      }
+                    }}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                  />
+                  {selectAllState.indeterminate && (
+                    <Minus className="absolute inset-0 h-3 w-3 m-auto pointer-events-none text-blue-600" />
+                  )}
+                </div>
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Select All {selectAllState.indeterminate && `(${selectedValues.length} of ${distinctValues.length})`}
+                </span>
+              </label>
+            </div>
+            <div className="max-h-64 overflow-y-auto p-2">
+              {distinctValues.length > 0 ? (
+                distinctValues.map(value => {
+                  const checkState = columnCheckStates[columnKey];
+                  const isChecked = checkState === 'none' 
+                    ? false 
+                    : (!columnFilters[columnKey] || selectedValues.includes(value));
+                  return (
+                    <label
+                      key={value}
+                      className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => handleCheckboxFilter(columnKey, value, e.target.checked, allCourses, filteredCourses)}
+                        className="h-3 w-3 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-1 dark:bg-gray-700 dark:border-gray-600"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                        {value}
+                      </span>
+                    </label>
+                  );
+                })
+              ) : (
+                <div className="text-sm text-gray-500 dark:text-gray-400 text-center py-2">
+                  No values available
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
+        {/* Resize handle */}
+        {columnIndex !== undefined && createResizeHandle(columnIndex)}
+      </th>
+    );
+  };
 
   // Function to calculate dropdown position
   const calculateDropdownPosition = (buttonElement) => {
@@ -271,6 +768,24 @@ function CoursesPage() {
       top: rect.top + window.scrollY,
       left: rect.left - dropdownWidth - 8 // 8px spacing
     };
+  };
+  
+  // Function to calculate filter dropdown position
+  const calculateFilterDropdownPosition = (buttonElement) => {
+    const rect = buttonElement.getBoundingClientRect();
+    const dropdownWidth = 250; // min-w-[200px] max-w-[300px]
+    const windowWidth = window.innerWidth;
+    
+    // Position below the button
+    let top = rect.bottom + window.scrollY + 4; // 4px spacing
+    let left = rect.left + window.scrollX;
+    
+    // Adjust if dropdown would go off the right edge
+    if (left + dropdownWidth > windowWidth) {
+      left = windowWidth - dropdownWidth - 10;
+    }
+    
+    return { top, left };
   };
 
   // Handle course duplication - navigate to create page with pre-filled data
@@ -377,17 +892,11 @@ function CoursesPage() {
 
   const { data: coursesData, isLoading, error } = useQuery({
     queryKey: ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { 
-      priority: filters.priority, 
-      modality: filters.modality,
       list_id: listId
-      // Exclude status from query key since we filter on frontend
     }],
     queryFn: () => {
       const params = {
-        priority: filters.priority || undefined,
-        modality: filters.modality || undefined,
         list_id: listId || undefined, // Filter by list if in list context
-        // Don't send status to backend - we'll filter on frontend using derived status
         limit: 1000 // Increased to show all courses
       };
       
@@ -521,14 +1030,9 @@ function CoursesPage() {
   };
 
   const clearFilters = () => {
-    setFilters({
-      priority: '',
-      modality: '',
-      status: '',
-      overdue: '',
-      active: ''
-    });
+    setFilters({});
     setSearchTerm('');
+    setColumnFilters({});
     // Clear URL parameters but preserve groupBy
     const params = new URLSearchParams(searchParams);
     const currentGroupBy = params.get('groupBy');
@@ -569,6 +1073,14 @@ function CoursesPage() {
     setShowCourseModal(false);
   };
 
+  // Handle different data structures from getAll() vs getByUser()
+  const rawCourses = coursesData?.data?.data?.courses || coursesData?.data?.courses || [];
+  
+  // Save the original unfiltered list for filter dropdowns (before ANY filtering)
+  // Use useMemo to ensure this is computed once and preserved
+  const allCourses = useMemo(() => {
+    return [...rawCourses];
+  }, [coursesData]);
 
   if (isLoading) {
     return (
@@ -599,9 +1111,9 @@ function CoursesPage() {
       </div>
     );
   }
-
-  // Handle different data structures from getAll() vs getByUser()
-  let coursesList = coursesData?.data?.data?.courses || coursesData?.data?.courses || [];
+  
+  // Start with a copy for filtering
+  let coursesList = [...rawCourses];
   
   // Build hierarchy lookup for search
   const hierarchyLookup = {};
@@ -628,6 +1140,7 @@ function CoursesPage() {
     coursesList = coursesList.filter(course => {
       const matchesCourse = 
         course.title?.toLowerCase().includes(searchLower) ||
+        course.course_code?.toLowerCase().includes(searchLower) ||
         course.description?.toLowerCase().includes(searchLower);
       
       // Also search in hierarchy path
@@ -656,24 +1169,118 @@ function CoursesPage() {
     });
   }
 
-  // Apply status filtering using course's database status
-  if (filters.status) {
+  
+  // Apply column-specific filters
+  Object.entries(columnFilters).forEach(([columnKey, selectedValues]) => {
+    // If empty array, filter out everything (nothing selected)
+    // If undefined/not in columnFilters, show all (no filter applied)
+    if (!selectedValues) return;
+    if (selectedValues.length === 0) {
+      // Empty array means show nothing
+      coursesList = [];
+      return;
+    }
+    
     coursesList = coursesList.filter(course => {
-      // Use the course's actual status field from the database
-      const courseStatus = course.status || 'inactive';
+      let value;
+      switch (columnKey) {
+        case 'course':
+          value = course.title;
+          break;
+        case 'status':
+          value = course.status;
+          break;
+        case 'progress':
+          const subtasks = course.subtasks || [];
+          const progress = subtasks.length > 0 && phaseStatusesData 
+            ? calculateProgress(subtasks, phaseStatusesData, null, course.modality)
+            : 0;
+          value = `${Math.round(progress)}%`;
+          break;
+        case 'modality':
+          value = course.modality;
+          break;
+        case 'priority':
+          value = course.priority;
+          break;
+        case 'start_date':
+          value = course.start_date ? formatDate(course.start_date) : 'Not set';
+          break;
+        case 'due_date':
+          value = course.due_date ? formatDate(course.due_date) : 'Not set';
+          break;
+        case 'lead':
+          value = course.owner?.name || 'Unassigned';
+          break;
+        default:
+          return true;
+      }
+      return selectedValues.includes(value);
+    });
+  });
+  
+  // Apply sorting
+  if (sortConfig.key) {
+    coursesList = [...coursesList].sort((a, b) => {
+      let aValue, bValue;
       
-      return courseStatus === filters.status;
+      switch (sortConfig.key) {
+        case 'course':
+          aValue = a.title || '';
+          bValue = b.title || '';
+          break;
+        case 'status':
+          aValue = a.status || '';
+          bValue = b.status || '';
+          break;
+        case 'progress':
+          const aSubtasks = a.subtasks || [];
+          const bSubtasks = b.subtasks || [];
+          aValue = aSubtasks.length > 0 && phaseStatusesData 
+            ? calculateProgress(aSubtasks, phaseStatusesData, null, a.modality)
+            : 0;
+          bValue = bSubtasks.length > 0 && phaseStatusesData 
+            ? calculateProgress(bSubtasks, phaseStatusesData, null, b.modality)
+            : 0;
+          break;
+        case 'modality':
+          aValue = a.modality || '';
+          bValue = b.modality || '';
+          break;
+        case 'priority':
+          aValue = a.priority || '';
+          bValue = b.priority || '';
+          break;
+        case 'start_date':
+          aValue = a.start_date || '';
+          bValue = b.start_date || '';
+          break;
+        case 'due_date':
+          aValue = a.due_date || '';
+          bValue = b.due_date || '';
+          break;
+        case 'lead':
+          aValue = a.owner?.name || '';
+          bValue = b.owner?.name || '';
+          break;
+        default:
+          return 0;
+      }
+      
+      // Handle numeric vs string comparison
+      if (typeof aValue === 'number' && typeof bValue === 'number') {
+        return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+      }
+      
+      // String comparison
+      const comparison = aValue.toString().localeCompare(bValue.toString());
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
   }
   
-  // Apply modality filtering
-  if (filters.modality) {
-    coursesList = coursesList.filter(course => {
-      return course.modality === filters.modality;
-    });
-  }
-  
-  const hasActiveFilters = Object.values(filters).some(v => v) || searchTerm.trim();
+  const hasActiveFilters = Object.values(filters).some(v => v) || 
+                           searchTerm.trim() || 
+                           Object.values(columnFilters).some(v => v && v.length > 0);
 
   // Group courses by status if groupBy is set
   const groupedCourses = groupBy === 'status' ? (() => {
@@ -693,6 +1300,63 @@ function CoursesPage() {
       }
       groups[statusLabel].push(course);
     });
+    
+    // Apply sorting within each group if needed
+    if (sortConfig.key) {
+      Object.values(groups).forEach(groupCourses => {
+        groupCourses.sort((a, b) => {
+          let aValue, bValue;
+          
+          switch (sortConfig.key) {
+            case 'course':
+              aValue = a.title || '';
+              bValue = b.title || '';
+              break;
+            case 'progress':
+              const aSubtasksGrp = a.subtasks || [];
+              const bSubtasksGrp = b.subtasks || [];
+              aValue = aSubtasksGrp.length > 0 && phaseStatusesData 
+                ? calculateProgress(aSubtasksGrp, phaseStatusesData, null, a.modality)
+                : 0;
+              bValue = bSubtasksGrp.length > 0 && phaseStatusesData 
+                ? calculateProgress(bSubtasksGrp, phaseStatusesData, null, b.modality)
+                : 0;
+              break;
+            case 'modality':
+              aValue = a.modality || '';
+              bValue = b.modality || '';
+              break;
+            case 'priority':
+              aValue = a.priority || '';
+              bValue = b.priority || '';
+              break;
+            case 'start_date':
+              aValue = a.start_date || '';
+              bValue = b.start_date || '';
+              break;
+            case 'due_date':
+              aValue = a.due_date || '';
+              bValue = b.due_date || '';
+              break;
+            case 'lead':
+              aValue = a.owner?.name || '';
+              bValue = b.owner?.name || '';
+              break;
+            default:
+              return 0;
+          }
+          
+          // Handle numeric vs string comparison
+          if (typeof aValue === 'number' && typeof bValue === 'number') {
+            return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+          }
+          
+          // String comparison
+          const comparison = aValue.toString().localeCompare(bValue.toString());
+          return sortConfig.direction === 'asc' ? comparison : -comparison;
+        });
+      });
+    }
     
     // Sort groups by status order_index from database
     const sortedGroups = {};
@@ -748,9 +1412,9 @@ function CoursesPage() {
 
       {/* Search and Filters */}
       <div className="mb-6 bg-white dark:bg-gray-800 shadow rounded-lg p-2">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-2">
+        <div className="flex gap-2 items-center">
           {/* Search */}
-          <div className="lg:col-span-2">
+          <div className="flex-1 max-w-md">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400 dark:text-gray-500" />
@@ -765,66 +1429,16 @@ function CoursesPage() {
             </div>
           </div>
 
-          {/* Priority Filter */}
-          <div>
-            <select
-              value={filters.priority}
-              onChange={(e) => handleFilterChange('priority', e.target.value)}
-              className="block w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+          {/* Clear Search */}
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="inline-flex items-center justify-center px-2 py-1 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
-              <option value="">All Priorities</option>
-              {PRIORITIES.map(priority => (
-                <option key={priority} value={priority}>
-                  {priority.charAt(0).toUpperCase() + priority.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Modality Filter */}
-          <div>
-            <select
-              value={filters.modality}
-              onChange={(e) => handleFilterChange('modality', e.target.value)}
-              className="block w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All Modalities</option>
-              {MODALITIES.map(modality => (
-                <option key={modality.value} value={modality.value}>
-                  {modality.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <select
-              value={filters.status}
-              onChange={(e) => handleFilterChange('status', e.target.value)}
-              className="block w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All Statuses</option>
-              {(statusesData?.data || statusesData || []).map((status) => (
-                <option key={status.value} value={status.value}>
-                  {status.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Clear Filters */}
-          <div>
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="w-full inline-flex items-center justify-center px-2 py-1 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                <Filter className="h-3 w-3 mr-1" />
-                Clear
-              </button>
-            )}
-          </div>
+              <X className="h-3 w-3 mr-1" />
+              Clear
+            </button>
+          )}
 
           {/* Group by Status */}
           <div>
@@ -857,17 +1471,40 @@ function CoursesPage() {
           </div>
 
           {/* Reset Column Widths */}
-          <div>
+          <div className="flex gap-2">
             <button
               onClick={() => {
                 resetToDefaults();
                 toast.success('Column widths reset to defaults');
               }}
-              className="w-full inline-flex items-center justify-center px-2 py-1 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+              className="inline-flex items-center justify-center px-3 py-1 border border-gray-300 dark:border-gray-600 shadow-sm text-sm font-medium rounded-md text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 whitespace-nowrap"
               title="Reset column widths to default"
             >
-              <RefreshCw className="h-3 w-3 mr-1" />
+              <RefreshCw className="h-3 w-3 mr-1.5" />
               <span className="text-sm">Reset Columns</span>
+            </button>
+            <button
+              onClick={() => {
+                // Clear all column filters
+                setColumnFilters({});
+                setColumnCheckStates({});
+                setShowFilterInputs({});
+                toast.success('All filters cleared');
+              }}
+              className={`inline-flex items-center justify-center px-3 py-1 border shadow-sm text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 whitespace-nowrap ${
+                Object.keys(columnFilters).length > 0 
+                  ? 'border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 focus:ring-blue-500'
+                  : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:ring-gray-500'
+              }`}
+              title={`Clear all column filters${Object.keys(columnFilters).length > 0 ? ` (${Object.keys(columnFilters).length} active)` : ''}`}
+            >
+              <XCircle className="h-3 w-3 mr-1.5" />
+              <span className="text-sm whitespace-nowrap">
+                Clear Filters
+                {Object.keys(columnFilters).length > 0 && (
+                  <span className="ml-1">({Object.keys(columnFilters).length})</span>
+                )}
+              </span>
             </button>
           </div>
 
@@ -987,7 +1624,7 @@ function CoursesPage() {
                   </div>
                 </button>
                 {isExpanded && (
-                  <div className="overflow-x-auto">
+                  <div className="relative" style={{ maxHeight: '1200px', overflow: 'auto' }}>
                 <table 
                   className="divide-y divide-gray-200 dark:divide-gray-700"
                   style={{ 
@@ -998,37 +1635,21 @@ function CoursesPage() {
                     <col style={{ width: `${columnWidths[0] || 500}px` }} />
                     <col style={{ width: `${columnWidths[1] || 170}px` }} />
                     <col style={{ width: `${columnWidths[2] || 160}px` }} />
-                    <col style={{ width: `${columnWidths[3] || 160}px` }} />
+                    <col style={{ width: `${columnWidths[3] || 120}px` }} />
                     <col style={{ width: `${columnWidths[4] || 160}px` }} />
-                    <col style={{ width: `${columnWidths[5] || 150}px` }} />
-                    <col style={{ width: `${columnWidths[6] || 80}px` }} />
+                    <col style={{ width: `${columnWidths[5] || 160}px` }} />
+                    <col style={{ width: `${columnWidths[6] || 150}px` }} />
+                    <col style={{ width: `${columnWidths[7] || 80}px` }} />
                   </colgroup>
-                  <thead className="bg-gray-50 dark:bg-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
                     <tr>
-                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                        <span className="truncate block pr-2" title="Course">Course</span>
-                        {createResizeHandle(0)}
-                      </th>
-                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                        <span className="truncate block pr-2" title="Progress">Progress</span>
-                        {createResizeHandle(1)}
-                      </th>
-                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                        <span className="truncate block pr-2" title="Modality">Modality</span>
-                        {createResizeHandle(2)}
-                      </th>
-                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                        <span className="truncate block pr-2" title="Start Date">Start Date</span>
-                        {createResizeHandle(3)}
-                      </th>
-                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                        <span className="truncate block pr-2" title="Due Date">Due Date</span>
-                        {createResizeHandle(4)}
-                      </th>
-                      <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                        <span className="truncate block pr-2" title="Lead">Lead</span>
-                        {createResizeHandle(5)}
-                      </th>
+                      <TableHeader columnKey="course" columnName="Course" columnIndex={0} allCourses={allCourses} filteredCourses={coursesList} />
+                      <TableHeader columnKey="progress" columnName="Progress" columnIndex={1} allCourses={allCourses} filteredCourses={coursesList} />
+                      <TableHeader columnKey="modality" columnName="Modality" columnIndex={2} allCourses={allCourses} filteredCourses={coursesList} />
+                      <TableHeader columnKey="priority" columnName="Priority" columnIndex={3} allCourses={allCourses} filteredCourses={coursesList} />
+                      <TableHeader columnKey="start_date" columnName="Start Date" columnIndex={4} allCourses={allCourses} filteredCourses={coursesList} />
+                      <TableHeader columnKey="due_date" columnName="Due Date" columnIndex={5} allCourses={allCourses} filteredCourses={coursesList} />
+                      <TableHeader columnKey="lead" columnName="Lead" columnIndex={6} allCourses={allCourses} filteredCourses={coursesList} />
                       <th scope="col" className="relative px-6 py-1">
                         <span className="sr-only">Actions</span>
                       </th>
@@ -1097,8 +1718,15 @@ function CoursesPage() {
 
                             {/* Modality Column */}
                             <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getModalityColor(course.modality)}`}>
                                 {course.modality || 'N/A'}
+                              </span>
+                            </td>
+
+                            {/* Priority Column */}
+                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')}`}>
+                                {course.priority || 'Low'}
                               </span>
                             </td>
 
@@ -1227,48 +1855,29 @@ function CoursesPage() {
       ) : (
         // Regular ungrouped view
         <div className="bg-white dark:bg-gray-800 shadow sm:rounded-md">
-          <div style={{ overflowX: 'auto', width: '100%' }}>
+          <div style={{ maxHeight: '1200px', overflow: 'auto', width: '100%' }}>
             <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: `${totalTableWidth}px` }}>
               <colgroup>
                 <col style={{ width: `${columnWidths[0] || 500}px` }} />
                 <col style={{ width: `${columnWidths[1] || 200}px` }} />
                 <col style={{ width: `${columnWidths[2] || 170}px` }} />
                 <col style={{ width: `${columnWidths[3] || 160}px` }} />
-                <col style={{ width: `${columnWidths[4] || 160}px` }} />
+                <col style={{ width: `${columnWidths[4] || 120}px` }} />
                 <col style={{ width: `${columnWidths[5] || 160}px` }} />
-                <col style={{ width: `${columnWidths[6] || 150}px` }} />
-                <col style={{ width: `${columnWidths[7] || 80}px` }} />
+                <col style={{ width: `${columnWidths[6] || 160}px` }} />
+                <col style={{ width: `${columnWidths[7] || 150}px` }} />
+                <col style={{ width: `${columnWidths[8] || 80}px` }} />
               </colgroup>
-              <thead className="bg-gray-50 dark:bg-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-700 sticky top-0 z-10">
                 <tr>
-                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                    <span className="truncate block pr-2" title="Course">Course</span>
-                    {createResizeHandle(0)}
-                  </th>
-                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                    <span className="truncate block pr-2" title="Status">Status</span>
-                    {createResizeHandle(1)}
-                  </th>
-                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                    <span className="truncate block pr-2" title="Progress">Progress</span>
-                    {createResizeHandle(2)}
-                  </th>
-                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                    <span className="truncate block pr-2" title="Modality">Modality</span>
-                    {createResizeHandle(3)}
-                  </th>
-                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                    <span className="truncate block pr-2" title="Start Date">Start Date</span>
-                    {createResizeHandle(4)}
-                  </th>
-                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                    <span className="truncate block pr-2" title="Due Date">Due Date</span>
-                    {createResizeHandle(5)}
-                  </th>
-                  <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
-                    <span className="truncate block pr-2" title="Lead">Lead</span>
-                    {createResizeHandle(6)}
-                  </th>
+                  <TableHeader columnKey="course" columnName="Course" columnIndex={0} allCourses={allCourses} filteredCourses={coursesList} />
+                  <TableHeader columnKey="status" columnName="Status" columnIndex={1} allCourses={allCourses} filteredCourses={coursesList} />
+                  <TableHeader columnKey="progress" columnName="Progress" columnIndex={2} allCourses={allCourses} filteredCourses={coursesList} />
+                  <TableHeader columnKey="modality" columnName="Modality" columnIndex={3} allCourses={allCourses} filteredCourses={coursesList} />
+                  <TableHeader columnKey="priority" columnName="Priority" columnIndex={4} allCourses={allCourses} filteredCourses={coursesList} />
+                  <TableHeader columnKey="start_date" columnName="Start Date" columnIndex={5} allCourses={allCourses} filteredCourses={coursesList} />
+                  <TableHeader columnKey="due_date" columnName="Due Date" columnIndex={6} allCourses={allCourses} filteredCourses={coursesList} />
+                  <TableHeader columnKey="lead" columnName="Lead" columnIndex={7} allCourses={allCourses} filteredCourses={coursesList} />
                   <th scope="col" className="relative px-6 py-1">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -1346,8 +1955,15 @@ function CoursesPage() {
 
                         {/* Modality Column */}
                         <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getModalityColor(course.modality)}`}>
                             {course.modality || 'N/A'}
+                          </span>
+                        </td>
+
+                        {/* Priority Column */}
+                        <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')}`}>
+                            {course.priority || 'Low'}
                           </span>
                         </td>
 

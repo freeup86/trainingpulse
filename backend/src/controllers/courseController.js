@@ -17,11 +17,7 @@ const createDynamicCourseSchema = async () => {
     description: Joi.string().max(2000).optional().allow(''),
     modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
     listId: Joi.string().uuid().required(),
-    deliverables: Joi.when('modality', {
-      is: 'WBT',
-      then: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
-      otherwise: Joi.array().items(Joi.number().integer().positive()).optional()
-    }),
+    deliverables: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
     priority: Joi.string().valid(...validPriorities).default('medium'),
     ownerId: Joi.number().integer().positive().optional(),
     startDate: Joi.date().optional(),
@@ -50,11 +46,7 @@ const createCourseSchema = Joi.object({
   description: Joi.string().max(2000).optional().allow(''),
   modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
   listId: Joi.string().uuid().required(),
-  deliverables: Joi.when('modality', {
-    is: 'WBT',
-    then: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
-    otherwise: Joi.array().items(Joi.number().integer().positive()).optional()
-  }),
+  deliverables: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
   priority: Joi.string().optional(), // Will be validated dynamically
   ownerId: Joi.number().integer().positive().optional(),
   startDate: Joi.date().optional().allow(null),
@@ -483,6 +475,13 @@ class CourseController {
       }
 
       // Use user-selected deliverables for all modalities
+      logger.info('Saving deliverables for course', {
+        courseId: newCourse.id,
+        modality,
+        deliverables,
+        deliverableCount: deliverables.length
+      });
+      
       for (const deliverableId of deliverables) {
         await client.query(`
           INSERT INTO course_deliverables (course_id, deliverable_id)
@@ -679,6 +678,13 @@ class CourseController {
       dependencies: additionalData.dependencies || [],
       deliverables: additionalData.deliverables || []
     };
+    
+    logger.info('Retrieved course details', {
+      courseId: id,
+      modality: course.modality,
+      deliverableCount: course.deliverables ? course.deliverables.length : 0,
+      deliverables: course.deliverables
+    });
 
     logger.info('getCourseById workflow_state debug', {
       courseId: id,

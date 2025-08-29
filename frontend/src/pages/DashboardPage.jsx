@@ -11,7 +11,7 @@ import {
   Plus
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth.jsx';
-import { courses, analytics, notifications } from '../lib/api';
+import { courses, analytics, notifications, users } from '../lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -28,7 +28,13 @@ export function DashboardPage() {
       completedCourses: 0,
       overdueCourses: 0
     },
-    recentCourses: [],
+    assignmentStats: {
+      totalAssignments: 0,
+      pendingAssignments: 0,
+      inProgressAssignments: 0,
+      completedAssignments: 0,
+      overdueAssignments: 0
+    },
     notifications: [],
     bottlenecks: []
   });
@@ -39,37 +45,60 @@ export function DashboardPage() {
         setLoading(true);
 
         // Fetch data in parallel - admin gets all courses, others get user-specific courses
-        const coursesPromise = user.role === 'admin' 
-          ? courses.getAll({ limit: 10, sortBy: 'updated_at', sortOrder: 'desc' })
-          : courses.getByUser(user.id, { limit: 10, sortBy: 'updated_at', sortOrder: 'desc' });
+        // Fetch ALL courses without pagination for accurate stats
+        const allCoursesPromise = user.role === 'admin' 
+          ? courses.getAll({ limit: 1000 }) // Get all courses, not just default 20
+          : courses.getByUser(user.id, { limit: 1000 });
+        
+        const assignmentsPromise = users.getSubtaskAssignments(user.id);
           
-        const [coursesResponse, notificationsResponse, bottlenecksResponse] = await Promise.allSettled([
-          coursesPromise,
+        const [allCoursesResponse, assignmentsResponse, notificationsResponse, bottlenecksResponse] = await Promise.allSettled([
+          allCoursesPromise,
+          assignmentsPromise,
           notifications.getDigest({ maxAge: 24 }),
           analytics.getBottlenecks({ period: '7d', limit: 5 })
         ]);
 
-        const coursesData = coursesResponse.status === 'fulfilled' ? coursesResponse.value.data.data : null;
-        const notificationsData = notificationsResponse.status === 'fulfilled' ? notificationsResponse.value.data.data : null;
-        const bottlenecksData = bottlenecksResponse.status === 'fulfilled' ? bottlenecksResponse.value.data.data : null;
+        const allCoursesData = allCoursesResponse.status === 'fulfilled' ? allCoursesResponse.value.data : null;
+        const assignmentsData = assignmentsResponse.status === 'fulfilled' ? assignmentsResponse.value.data : null;
+        const notificationsData = notificationsResponse.status === 'fulfilled' ? notificationsResponse.value.data : null;
+        const bottlenecksData = bottlenecksResponse.status === 'fulfilled' ? bottlenecksResponse.value.data : null;
 
-        // Calculate statistics from courses (all courses for admin, user courses for others)
+        // Calculate statistics from ALL courses
         // Handle different data structures from getAll() vs getByUser()
-        const coursesList = coursesData?.courses || coursesData?.data || [];
+        const allCoursesList = allCoursesData?.data?.courses || allCoursesData?.courses || [];
+        const assignmentsList = assignmentsData?.data?.assignments || assignmentsData?.assignments || [];
+        
         const stats = {
-          totalCourses: coursesList.length,
-          activeCourses: coursesList.filter(c => ['in_progress', 'content_development', 'review', 'legal_review'].includes(c.status)).length,
-          completedCourses: coursesList.filter(c => c.status === 'completed').length,
-          overdueCourses: coursesList.filter(c => {
-            return new Date(c.due_date) < new Date() && !['completed', 'cancelled'].includes(c.status);
+          totalCourses: allCoursesList.length,
+          activeCourses: allCoursesList.filter(c => {
+            const statusLower = c.status?.toLowerCase()?.trim();
+            // Check for the actual status values being used
+            return ['pre_development', 'outlines', 'storyboard', 'development'].includes(statusLower);
+          }).length,
+          completedCourses: allCoursesList.filter(c => c.status?.toLowerCase()?.trim() === 'completed').length,
+          overdueCourses: allCoursesList.filter(c => {
+            return c.due_date && new Date(c.due_date) < new Date() && c.status?.toLowerCase()?.trim() !== 'completed';
+          }).length
+        };
+
+        // Calculate assignment statistics
+        const now = new Date();
+        const assignmentStats = {
+          totalAssignments: assignmentsList.length,
+          pendingAssignments: assignmentsList.filter(a => a.phase_status === 'not_started').length,
+          inProgressAssignments: assignmentsList.filter(a => a.phase_status === 'in_progress').length,
+          completedAssignments: assignmentsList.filter(a => a.phase_status === 'completed').length,
+          overdueAssignments: assignmentsList.filter(a => {
+            return a.finish_date && new Date(a.finish_date) < now && a.phase_status !== 'completed';
           }).length
         };
 
         setDashboardData({
           stats,
-          recentCourses: coursesList,
-          notifications: notificationsData?.urgent || [],
-          bottlenecks: bottlenecksData?.bottlenecks || []
+          assignmentStats,
+          notifications: notificationsData?.data?.urgent || notificationsData?.urgent || [],
+          bottlenecks: bottlenecksData?.data?.bottlenecks || bottlenecksData?.bottlenecks || []
         });
 
       } catch (error) {
@@ -80,7 +109,7 @@ export function DashboardPage() {
     };
 
     fetchDashboardData();
-  }, []);
+  }, [user.id, user.role]);
 
   const StatCard = ({ title, value, icon: Icon, color = 'blue', description, onClick }) => {
     const cardContent = (
@@ -167,8 +196,7 @@ export function DashboardPage() {
           value={dashboardData.stats.totalCourses}
           icon={BookOpen}
           color="blue"
-          description="All courses assigned to you"
-          onClick={() => navigate('/courses')}
+          description="All courses"
         />
         <StatCard
           title="Active Courses"
@@ -176,7 +204,6 @@ export function DashboardPage() {
           icon={Clock}
           color="yellow"
           description="Currently in progress"
-          onClick={() => navigate('/courses?filter=active')}
         />
         <StatCard
           title="Completed"
@@ -184,7 +211,6 @@ export function DashboardPage() {
           icon={CheckCircle}
           color="green"
           description="Successfully finished"
-          onClick={() => navigate('/courses?status=completed')}
         />
         <StatCard
           title="Overdue"
@@ -192,64 +218,93 @@ export function DashboardPage() {
           icon={AlertTriangle}
           color="red"
           description="Past due date"
-          onClick={() => navigate('/courses?filter=overdue')}
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Courses */}
+        {/* Assignments Statistics */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Courses</CardTitle>
+            <CardTitle>My Assignments</CardTitle>
             <CardDescription>
-              Your latest course activities
+              Phase assignments across all courses
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {dashboardData.recentCourses.length === 0 ? (
-              <div className="text-center py-6">
-                <BookOpen className="h-12 w-12 text-gray-400 dark:text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">No recent courses found</p>
-                <Link to="/programs">
-                  <Button variant="outline" className="mt-2">
-                    View Programs
-                  </Button>
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {dashboardData.recentCourses.slice(0, 5).map((course) => (
-                  <div key={course.id} className="flex items-center space-x-4">
-                    <div className="flex-1 min-w-0">
-                      <Link 
-                        to={`/courses/${course.id}`}
-                        className="text-sm font-medium text-gray-900 dark:text-gray-100 hover:text-blue-600 dark:hover:text-blue-400"
-                      >
-                        {course.title}
-                      </Link>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <Badge className={getStatusColor(course.status)}>
-                          {course.status}
-                        </Badge>
-                        <Badge className={getPriorityColor(course.priority)}>
-                          {course.priority}
-                        </Badge>
-                      </div>
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {formatRelativeTime(course.updated_at)}
-                    </div>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                    {dashboardData.assignmentStats.totalAssignments}
                   </div>
-                ))}
-                <div className="pt-2">
-                  <Link to="/programs" className="block">
-                    <Button variant="outline" className="w-full">
-                      View Programs
-                    </Button>
-                  </Link>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Total Assignments</div>
+                </div>
+                <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                  <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                    {dashboardData.assignmentStats.inProgressAssignments}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">In Progress</div>
                 </div>
               </div>
-            )}
+              
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center space-x-2">
+                    <Clock className="h-4 w-4 text-gray-400" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Pending</span>
+                  </div>
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">
+                    {dashboardData.assignmentStats.pendingAssignments}
+                  </span>
+                </div>
+                
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="h-4 w-4 text-green-500" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Completed</span>
+                  </div>
+                  <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                    {dashboardData.assignmentStats.completedAssignments}
+                  </span>
+                </div>
+                
+                {dashboardData.assignmentStats.overdueAssignments > 0 && (
+                  <div className="flex items-center justify-between py-2 px-2 bg-red-50 dark:bg-red-900/20 rounded">
+                    <div className="flex items-center space-x-2">
+                      <AlertTriangle className="h-4 w-4 text-red-500" />
+                      <span className="text-sm text-red-600 dark:text-red-400">Overdue</span>
+                    </div>
+                    <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                      {dashboardData.assignmentStats.overdueAssignments}
+                    </span>
+                  </div>
+                )}
+              </div>
+              
+              <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                  Completion Rate
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                    <div 
+                      className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                      style={{ 
+                        width: `${dashboardData.assignmentStats.totalAssignments > 0 
+                          ? (dashboardData.assignmentStats.completedAssignments / dashboardData.assignmentStats.totalAssignments * 100) 
+                          : 0}%` 
+                      }}
+                    />
+                  </div>
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">
+                    {dashboardData.assignmentStats.totalAssignments > 0 
+                      ? Math.round(dashboardData.assignmentStats.completedAssignments / dashboardData.assignmentStats.totalAssignments * 100)
+                      : 0}%
+                  </span>
+                </div>
+              </div>
+              
+            </div>
           </CardContent>
         </Card>
 

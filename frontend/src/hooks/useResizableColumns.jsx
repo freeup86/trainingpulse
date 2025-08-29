@@ -91,7 +91,7 @@ export function useResizableColumns(columns, tableId) {
         }}
         onMouseDown={(e) => handleMouseDown(e, columnIndex)}
       >
-        <div className="w-px h-full bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-500 dark:group-hover:bg-blue-400 transition-colors mx-auto" />
+        <div className="w-px h-full bg-gray-200 dark:bg-gray-700 opacity-50 group-hover:opacity-100 group-hover:bg-gray-300 dark:group-hover:bg-gray-600 transition-all mx-auto" />
       </div>
     );
   };

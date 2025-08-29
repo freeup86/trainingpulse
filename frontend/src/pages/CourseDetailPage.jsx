@@ -413,18 +413,18 @@ export default function CourseDetailPage() {
           </Card>
 
           {/* Course Deliverables */}
-          {course?.deliverables && course.deliverables.length > 0 && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center space-x-2">
-                  <Package className="h-5 w-5 text-gray-600 dark:text-gray-300" />
-                  <CardTitle>Course Deliverables</CardTitle>
-                </div>
-                <CardDescription>
-                  Deliverables associated with this course
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <Card>
+            <CardHeader>
+              <div className="flex items-center space-x-2">
+                <Package className="h-5 w-5 text-gray-600 dark:text-gray-300" />
+                <CardTitle>Course Deliverables</CardTitle>
+              </div>
+              <CardDescription>
+                Deliverables associated with this course
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {course?.deliverables && course.deliverables.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {course.deliverables.map((deliverable, index) => (
                     <div 
@@ -447,9 +447,19 @@ export default function CourseDetailPage() {
                     </div>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              ) : (
+                <div className="text-center py-8">
+                  <Package className="h-12 w-12 text-gray-400 dark:text-gray-600 mx-auto mb-3" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    No deliverables defined for this course
+                  </p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    Deliverables can be added when editing the course
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Course Content */}
           {course.content && (
