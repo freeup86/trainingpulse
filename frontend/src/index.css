@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom styles for select elements */
+@layer utilities {
+  /* Hide default select arrow */
+  .phase-status-select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: none;
+  }
+  
+  /* Additional fixes for specific browsers */
+  .phase-status-select::-ms-expand {
+    display: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-gray-200;

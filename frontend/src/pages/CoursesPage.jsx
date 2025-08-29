@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.jsx';
-import { useResizableColumns } from '../hooks/useResizableColumns.jsx';
 import { 
   Search, 
   Filter, 
@@ -227,22 +226,22 @@ function CoursesPage() {
 
   // Setup resizable columns with minimum widths to prevent header overflow
   const tableColumns = [
-    { name: 'Course', defaultWidth: 150, minWidth: 100 },
-    { name: 'Progress', defaultWidth: 150, minWidth: 90 },
-    { name: 'Modality', defaultWidth: 100, minWidth: 85 },
-    { name: 'Start Date', defaultWidth: 120, minWidth: 100 },
-    { name: 'Due Date', defaultWidth: 120, minWidth: 90 },
+    { name: 'Course', defaultWidth: 500, minWidth: 250 },
+    { name: 'Progress', defaultWidth: 170, minWidth: 90 },
+    { name: 'Modality', defaultWidth: 160, minWidth: 85 },
+    { name: 'Start Date', defaultWidth: 160, minWidth: 100 },
+    { name: 'Due Date', defaultWidth: 160, minWidth: 90 },
     { name: 'Lead', defaultWidth: 150, minWidth: 60 },
     { name: 'Actions', defaultWidth: 80, minWidth: 80 }
   ];
 
   const tableColumnsWithStatus = [
-    { name: 'Course', defaultWidth: 150, minWidth: 100 },
-    { name: 'Status', defaultWidth: 140, minWidth: 90 },
-    { name: 'Progress', defaultWidth: 150, minWidth: 90 },
-    { name: 'Modality', defaultWidth: 100, minWidth: 85 },
-    { name: 'Start Date', defaultWidth: 120, minWidth: 100 },
-    { name: 'Due Date', defaultWidth: 120, minWidth: 90 },
+    { name: 'Course', defaultWidth: 500, minWidth: 250 },
+    { name: 'Status', defaultWidth: 200, minWidth: 100 },
+    { name: 'Progress', defaultWidth: 170, minWidth: 90 },
+    { name: 'Modality', defaultWidth: 160, minWidth: 85 },
+    { name: 'Start Date', defaultWidth: 160, minWidth: 100 },
+    { name: 'Due Date', defaultWidth: 160, minWidth: 90 },
     { name: 'Lead', defaultWidth: 150, minWidth: 60 },
     { name: 'Actions', defaultWidth: 80, minWidth: 80 }
   ];
@@ -250,33 +249,10 @@ function CoursesPage() {
   // When grouped by status, we don't show status column. Otherwise we do.
   const currentColumns = groupBy === 'status' ? tableColumns : tableColumnsWithStatus;
   
-  const { columnWidths, createResizeHandle, setColumnWidths, resetToDefaults } = useResizableColumns(
-    currentColumns, 
-    `courses-table-${listId || 'all'}-${groupBy || 'none'}`
-  );
-  
-  // Force reset on mount to ensure proper defaults
-  useEffect(() => {
-    console.log('Resetting to defaults on mount');
-    resetToDefaults();
-  }, [resetToDefaults]);
-  
-  // Debug: Track columnWidths changes
-  useEffect(() => {
-    console.log('CoursesPage - columnWidths:', columnWidths);
-    console.log('CoursesPage - Course width should be:', columnWidths[0] || 150);
-    console.log('CoursesPage - currentColumns:', currentColumns);
-    // Check if resize handles are working
-    const handles = document.querySelectorAll('.cursor-col-resize');
-    console.log('Found resize handles:', handles.length);
-  }, [columnWidths, currentColumns]);
-  
-  // Calculate total table width - ensure we have valid widths
-  const totalTableWidth = currentColumns.reduce((sum, col, index) => {
-    const width = columnWidths[index] || col.defaultWidth || 150;
-    return sum + width;
+  // Calculate total table width
+  const totalTableWidth = currentColumns.reduce((sum, col) => {
+    return sum + (col.defaultWidth || 150);
   }, 0);
-  console.log('Total table width:', totalTableWidth);
 
   // Function to calculate dropdown position
   const calculateDropdownPosition = (buttonElement) => {
@@ -872,18 +848,6 @@ function CoursesPage() {
             </button>
           </div>
 
-          {/* Temporary Reset Column Widths Button */}
-          <div>
-            <button
-              onClick={() => {
-                resetToDefaults();
-                console.log('Column widths reset to defaults');
-              }}
-              className="w-full inline-flex items-center justify-center px-2 py-1 border border-red-300 dark:border-red-600 shadow-sm text-sm font-medium rounded-md text-red-700 dark:text-red-300 bg-white dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-900/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-            >
-              Reset Widths
-            </button>
-          </div>
         </div>
       </div>
 
@@ -1008,39 +972,33 @@ function CoursesPage() {
                     width: `${totalTableWidth}px`
                   }}>
                   <colgroup>
-                    <col style={{ width: `${columnWidths[0] || 150}px` }} />
-                    <col style={{ width: `${columnWidths[1] || 150}px` }} />
-                    <col style={{ width: `${columnWidths[2] || 100}px` }} />
-                    <col style={{ width: `${columnWidths[3] || 120}px` }} />
-                    <col style={{ width: `${columnWidths[4] || 120}px` }} />
-                    <col style={{ width: `${columnWidths[5] || 150}px` }} />
-                    <col style={{ width: `${columnWidths[6] || 80}px` }} />
+                    <col style={{ width: '500px' }} />
+                    <col style={{ width: '170px' }} />
+                    <col style={{ width: '160px' }} />
+                    <col style={{ width: '160px' }} />
+                    <col style={{ width: '160px' }} />
+                    <col style={{ width: '150px' }} />
+                    <col style={{ width: '80px' }} />
                   </colgroup>
                   <thead className="bg-gray-50 dark:bg-gray-700">
                     <tr>
                       <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
                         <span className="truncate block pr-2" title="Course">Course</span>
-                        {createResizeHandle(0)}
                       </th>
                       <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
                         <span className="truncate block pr-2" title="Progress">Progress</span>
-                        {createResizeHandle(1)}
                       </th>
                       <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
                         <span className="truncate block pr-2" title="Modality">Modality</span>
-                        {createResizeHandle(2)}
                       </th>
                       <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
                         <span className="truncate block pr-2" title="Start Date">Start Date</span>
-                        {createResizeHandle(3)}
                       </th>
                       <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
                         <span className="truncate block pr-2" title="Due Date">Due Date</span>
-                        {createResizeHandle(4)}
                       </th>
                       <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider overflow-hidden">
                         <span className="truncate block pr-2" title="Lead">Lead</span>
-                        {createResizeHandle(5)}
                       </th>
                       <th scope="col" className="relative px-6 py-1">
                         <span className="sr-only">Actions</span>
@@ -1092,7 +1050,7 @@ function CoursesPage() {
                                     className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left truncate block w-full"
                                   >
                                     {course.course_code && (
-                                      <span className="text-gray-500 dark:text-gray-400 mr-2">{course.course_code}</span>
+                                      <span className="text-gray-500 dark:text-gray-400 mr-2 text-xs">{course.course_code}</span>
                                     )}
                                     {course.title}
                                   </button>
@@ -1109,7 +1067,7 @@ function CoursesPage() {
                             </td>
 
                             {/* Modality Column */}
-                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white" style={{ width: `${columnWidths[2] || currentColumns[2]?.defaultWidth || 150}px`, minWidth: `${currentColumns[2]?.minWidth || 50}px`, maxWidth: `${columnWidths[2]}px` }}>
+                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
                                 {course.modality || 'N/A'}
                               </span>
@@ -1152,7 +1110,7 @@ function CoursesPage() {
                             </td>
 
                             {/* Actions Column */}
-                            <td className="px-6 py-1 overflow-hidden text-right text-sm font-medium" style={{ width: `${columnWidths[6] || currentColumns[6]?.defaultWidth || 150}px`, minWidth: `${currentColumns[6]?.minWidth || 50}px`, maxWidth: `${columnWidths[6]}px` }}>
+                            <td className="px-6 py-1 overflow-hidden text-right text-sm font-medium">
                               <div className="relative">
                                 <button
                                   onClick={(e) => {
@@ -1243,44 +1201,37 @@ function CoursesPage() {
           <div style={{ overflowX: 'auto', width: '100%' }}>
             <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: `${totalTableWidth}px` }}>
               <colgroup>
-                <col style={{ width: `${columnWidths[0] || 150}px` }} />
-                <col style={{ width: `${columnWidths[1] || 140}px` }} />
-                <col style={{ width: `${columnWidths[2] || 150}px` }} />
-                <col style={{ width: `${columnWidths[3] || 100}px` }} />
-                <col style={{ width: `${columnWidths[4] || 120}px` }} />
-                <col style={{ width: `${columnWidths[5] || 120}px` }} />
-                <col style={{ width: `${columnWidths[6] || 150}px` }} />
-                <col style={{ width: `${columnWidths[7] || 80}px` }} />
+                <col style={{ width: '500px' }} />
+                <col style={{ width: '200px' }} />
+                <col style={{ width: '170px' }} />
+                <col style={{ width: '160px' }} />
+                <col style={{ width: '160px' }} />
+                <col style={{ width: '160px' }} />
+                <col style={{ width: '150px' }} />
+                <col style={{ width: '80px' }} />
               </colgroup>
               <thead className="bg-gray-50 dark:bg-gray-700">
                 <tr>
                   <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     <span className="truncate block pr-2" title="Course">Course</span>
-                    {createResizeHandle(0)}
                   </th>
                   <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     <span className="truncate block pr-2" title="Status">Status</span>
-                    {createResizeHandle(1)}
                   </th>
                   <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     <span className="truncate block pr-2" title="Progress">Progress</span>
-                    {createResizeHandle(2)}
                   </th>
                   <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     <span className="truncate block pr-2" title="Modality">Modality</span>
-                    {createResizeHandle(3)}
                   </th>
                   <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     <span className="truncate block pr-2" title="Start Date">Start Date</span>
-                    {createResizeHandle(4)}
                   </th>
                   <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     <span className="truncate block pr-2" title="Due Date">Due Date</span>
-                    {createResizeHandle(5)}
                   </th>
                   <th scope="col" className="relative px-6 py-1 text-left text-xs font-medium text-gray-900 dark:text-white uppercase tracking-wider">
                     <span className="truncate block pr-2" title="Lead">Lead</span>
-                    {createResizeHandle(6)}
                   </th>
                   <th scope="col" className="relative px-6 py-1">
                     <span className="sr-only">Actions</span>
@@ -1329,13 +1280,13 @@ function CoursesPage() {
                                   e.stopPropagation();
                                   openCourseModal(course);
                                 }}
-                                className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left truncate block"
+                                className="text-sm font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 text-left truncate block w-full"
                                 title={`${course.course_code ? course.course_code + ' - ' : ''}${course.title}`}
                               >
                                 {course.course_code && (
                                   <span className="text-gray-500 dark:text-gray-400 mr-1 text-xs">{course.course_code}</span>
                                 )}
-                                <span className="truncate">{course.title}</span>
+                                {course.title}
                               </button>
                             </div>
                           </div>
@@ -2122,7 +2073,7 @@ function CoursePhases({ courseId }) {
                             setEditingTaskId(null);
                           }, 200);
                         }}
-                        className={`phase-status-select text-xs px-1 py-1 rounded border cursor-pointer font-medium appearance-none pr-5 w-full ${
+                        className={`phase-status-select text-xs px-1 py-1 rounded border cursor-pointer font-medium pr-5 w-full ${
                           isEditing 
                             ? 'border-solid border-blue-500 dark:border-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500' 
                             : `border-dashed border-gray-300 dark:border-gray-600 hover:border-solid hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 transition-all ${currentStatus.color} bg-white dark:bg-gray-800`
