@@ -1,24 +1,19 @@
-const { Pool } = require('pg');
+const { query } = require('../config/database');
 const logger = require('../utils/logger');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false
-});
 
 /**
  * Get all priorities
  */
 exports.getAllPriorities = async (req, res) => {
   try {
-    const query = `
+    const sql = `
       SELECT id, value, label, icon, color, sort_order, is_active, is_default, created_at, updated_at
       FROM priorities 
       WHERE is_active = true
       ORDER BY sort_order ASC, created_at ASC
     `;
     
-    const result = await pool.query(query);
+    const result = await query(sql);
     
     res.json({
       success: true,
@@ -43,13 +38,13 @@ exports.getPriorityById = async (req, res) => {
   try {
     const { id } = req.params;
     
-    const query = `
+    const sql = `
       SELECT id, value, label, icon, color, sort_order, is_active, is_default, created_at, updated_at
       FROM priorities 
       WHERE id = $1 AND is_active = true
     `;
     
-    const result = await pool.query(query, [id]);
+    const result = await query(sql, [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -97,7 +92,7 @@ exports.createPriority = async (req, res) => {
     
     // Check if value already exists
     const existingQuery = 'SELECT id FROM priorities WHERE value = $1';
-    const existingResult = await pool.query(existingQuery, [value.toLowerCase()]);
+    const existingResult = await query(existingQuery, [value.toLowerCase()]);
     
     if (existingResult.rows.length > 0) {
       return res.status(409).json({
@@ -111,7 +106,7 @@ exports.createPriority = async (req, res) => {
     
     // If setting as default, unset other defaults
     if (is_default) {
-      await pool.query('UPDATE priorities SET is_default = false WHERE is_default = true');
+      await query('UPDATE priorities SET is_default = false WHERE is_default = true');
     }
     
     // Create new priority
@@ -121,7 +116,7 @@ exports.createPriority = async (req, res) => {
       RETURNING id, value, label, icon, color, sort_order, is_active, is_default, created_at, updated_at
     `;
     
-    const result = await pool.query(insertQuery, [
+    const result = await query(insertQuery, [
       value.toLowerCase(),
       label,
       icon,
@@ -156,7 +151,7 @@ exports.updatePriority = async (req, res) => {
     
     // Check if priority exists
     const existingQuery = 'SELECT * FROM priorities WHERE id = $1';
-    const existingResult = await pool.query(existingQuery, [id]);
+    const existingResult = await query(existingQuery, [id]);
     
     if (existingResult.rows.length === 0) {
       return res.status(404).json({
@@ -170,9 +165,35 @@ exports.updatePriority = async (req, res) => {
     
     const existingPriority = existingResult.rows[0];
     
-    // If setting as default, unset other defaults
+    // If setting as default, unset other defaults in a single transaction
     if (is_default && !existingPriority.is_default) {
-      await pool.query('UPDATE priorities SET is_default = false WHERE is_default = true');
+      // Use a single UPDATE with CASE to update all priorities efficiently
+      const startTime = Date.now();
+      logger.info(`Starting priority default update for id: ${id}`);
+      
+      await query(`
+        UPDATE priorities 
+        SET is_default = CASE 
+          WHEN id = $1 THEN true 
+          ELSE false 
+        END,
+        updated_at = CURRENT_TIMESTAMP
+        WHERE is_active = true
+      `, [id]);
+      
+      const duration = Date.now() - startTime;
+      logger.info(`Priority default update completed in ${duration}ms`);
+      
+      // Return the updated priority
+      const updatedResult = await query(
+        'SELECT id, value, label, icon, color, sort_order, is_active, is_default, created_at, updated_at FROM priorities WHERE id = $1',
+        [id]
+      );
+      
+      return res.json({
+        success: true,
+        data: updatedResult.rows[0]
+      });
     }
     
     // Build update query dynamically
@@ -225,7 +246,7 @@ exports.updatePriority = async (req, res) => {
       RETURNING id, value, label, icon, color, sort_order, is_active, is_default, created_at, updated_at
     `;
     
-    const result = await pool.query(updateQuery, values);
+    const result = await query(updateQuery, values);
     
     res.json({
       success: true,
@@ -252,7 +273,7 @@ exports.deletePriority = async (req, res) => {
     
     // Check if priority is in use
     const usageQuery = 'SELECT COUNT(*) as count FROM courses WHERE priority = (SELECT value FROM priorities WHERE id = $1)';
-    const usageResult = await pool.query(usageQuery, [id]);
+    const usageResult = await query(usageQuery, [id]);
     
     if (parseInt(usageResult.rows[0].count) > 0) {
       return res.status(409).json({
@@ -272,7 +293,7 @@ exports.deletePriority = async (req, res) => {
       RETURNING id
     `;
     
-    const result = await pool.query(deleteQuery, [id]);
+    const result = await query(deleteQuery, [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -300,17 +321,31 @@ exports.deletePriority = async (req, res) => {
   }
 };
 
+// Cache for valid priority values
+let priorityCache = null;
+let cacheExpiry = null;
+
 /**
  * Get valid priority values for validation
  */
 exports.getValidPriorityValues = async () => {
+  // Return cached values if still valid (cache for 5 minutes)
+  const now = Date.now();
+  if (priorityCache && cacheExpiry && cacheExpiry > now) {
+    return priorityCache;
+  }
+  
   try {
-    const query = 'SELECT value FROM priorities WHERE is_active = true';
-    const result = await pool.query(query);
-    return result.rows.map(row => row.value);
+    const sql = 'SELECT value FROM priorities WHERE is_active = true';
+    const result = await query(sql);
+    priorityCache = result.rows.map(row => row.value);
+    cacheExpiry = now + (5 * 60 * 1000); // Cache for 5 minutes
+    return priorityCache;
   } catch (error) {
     logger.error('Error fetching valid priority values:', error);
     // Return default values as fallback
-    return ['low', 'medium', 'high', 'critical', 'urgent'];
+    priorityCache = ['low', 'normal', 'high', 'urgent'];
+    cacheExpiry = now + (5 * 60 * 1000);
+    return priorityCache;
   }
 };

@@ -31,10 +31,11 @@ import {
   MoreVertical,
   XCircle,
   AlertCircle,
-  Minus
+  Minus,
+  Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { courses, statuses, phaseStatuses, users, modalityTasks, programs, lists } from '../lib/api';
+import { courses, statuses, phaseStatuses, users, modalityTasks, programs, lists, priorities, modalities } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor, getModalityColor } from '../lib/utils';
 import Breadcrumb, { useBreadcrumbs } from '../components/navigation/Breadcrumb';
 
@@ -45,6 +46,15 @@ const COURSE_STATUSES = {
   'on_hold': { icon: Pause, label: 'On Hold', color: 'text-yellow-500 dark:text-yellow-400' },
   'cancelled': { icon: X, label: 'Cancelled', color: 'text-red-500 dark:text-red-400' },
   'completed': { icon: CheckCircle, label: 'Completed', color: 'text-blue-500 dark:text-blue-400' }
+};
+
+// Helper function to get modality display name
+const getModalityDisplayName = (modalityValue, modalitiesData) => {
+  if (!modalityValue) return 'N/A';
+  if (!modalitiesData || modalitiesData.length === 0) return modalityValue;
+  
+  const modality = modalitiesData.find(m => m.value === modalityValue);
+  return modality ? modality.name : modalityValue;
 };
 
 // Mapping function to derive status from workflow state (temporary until proper status field exists)
@@ -107,7 +117,7 @@ const WORKFLOW_STATES = {
   'archived': { icon: Circle, label: 'Archived', color: 'text-gray-400 dark:text-gray-500' }
 };
 
-const PRIORITIES = ['low', 'medium', 'high', 'critical'];
+const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 const MODALITIES = [
   { value: 'WBT', label: 'WBT (Web-Based Training)' },
   { value: 'ILT/VLT', label: 'ILT/VLT (Instructor-Led/Virtual-Led Training)' },
@@ -236,6 +246,37 @@ function CoursesPage() {
   const [showFilterInputs, setShowFilterInputs] = useState({});
   const [filterDropdownPositions, setFilterDropdownPositions] = useState({});
   const [columnCheckStates, setColumnCheckStates] = useState({}); // Track checkbox visual state separately
+  
+  // Inline editing state
+  const [editingCell, setEditingCell] = useState(null); // { courseId, field }
+  const [editValues, setEditValues] = useState({});
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Handle click outside to close edit mode instantly
+  useEffect(() => {
+    if (!editingCell) return;
+    
+    const handleClickOutside = (event) => {
+      // Check if click is inside editing elements
+      if (dropdownRef.current?.contains(event.target)) return;
+      if (inputRef.current?.contains(event.target)) return;
+      
+      // Close editing immediately
+      setEditingCell(null);
+      setEditValues({});
+    };
+
+    // Small delay to let the edit mode initialize
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 10);
+    
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [editingCell]);
 
   // Setup resizable columns with minimum widths to prevent header overflow
   const tableColumns = [
@@ -243,8 +284,8 @@ function CoursesPage() {
     { name: 'Progress', defaultWidth: 170, minWidth: 90 },
     { name: 'Modality', defaultWidth: 160, minWidth: 85 },
     { name: 'Priority', defaultWidth: 150, minWidth: 80 },
-    { name: 'Start Date', defaultWidth: 160, minWidth: 100 },
-    { name: 'Due Date', defaultWidth: 160, minWidth: 90 },
+    { name: 'Start Date', defaultWidth: 170, minWidth: 100 },
+    { name: 'Due Date', defaultWidth: 170, minWidth: 90 },
     { name: 'Lead', defaultWidth: 150, minWidth: 60 },
     { name: 'Actions', defaultWidth: 80, minWidth: 80 }
   ];
@@ -255,8 +296,8 @@ function CoursesPage() {
     { name: 'Progress', defaultWidth: 170, minWidth: 90 },
     { name: 'Modality', defaultWidth: 160, minWidth: 85 },
     { name: 'Priority', defaultWidth: 150, minWidth: 80 },
-    { name: 'Start Date', defaultWidth: 160, minWidth: 100 },
-    { name: 'Due Date', defaultWidth: 160, minWidth: 90 },
+    { name: 'Start Date', defaultWidth: 170, minWidth: 100 },
+    { name: 'Due Date', defaultWidth: 170, minWidth: 90 },
     { name: 'Lead', defaultWidth: 150, minWidth: 60 },
     { name: 'Actions', defaultWidth: 80, minWidth: 80 }
   ];
@@ -331,7 +372,7 @@ function CoursesPage() {
           value = `${Math.round(progress)}%`;
           break;
         case 'modality':
-          value = course.modality;
+          value = getModalityDisplayName(course.modality, modalitiesData);
           break;
         case 'priority':
           value = course.priority;
@@ -639,7 +680,7 @@ function CoursesPage() {
               }}
               className={`p-0.5 rounded transition-all ${
                 hasActiveFilter 
-                  ? 'bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-700 ring-2 ring-blue-400 ring-offset-1' 
+                  ? 'bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-700 ring-2 ring-blue-400' 
                   : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
               }`}
               title={`Filter ${columnName}${hasActiveFilter ? ` (${selectedValues.length} selected)` : ''}`}
@@ -787,6 +828,63 @@ function CoursesPage() {
     
     return { top, left };
   };
+
+  // Helper function to format date for HTML date input
+  const formatDateForInput = (dateValue) => {
+    if (!dateValue) return '';
+    
+    // Convert to string
+    const dateStr = String(dateValue);
+    
+    // If already in YYYY-MM-DD format, return as-is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr;
+    }
+    
+    // For ISO strings, just take the date part
+    if (dateStr.includes('T')) {
+      return dateStr.split('T')[0];
+    }
+    
+    // Parse date and use local time to match what user sees
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '';
+    
+    // Use local date values to match UI
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Inline editing functions
+  const handleEditCell = (courseId, field, currentValue) => {
+    // Set editing state
+    setEditingCell({ courseId, field });
+    
+    // Set initial value
+    if (field === 'start_date' || field === 'due_date') {
+      setEditValues({ [`${courseId}-${field}`]: formatDateForInput(currentValue) });
+    } else {
+      setEditValues({ [`${courseId}-${field}`]: currentValue || '' });
+    }
+    
+    // Auto-open select dropdown for priority
+    if (field === 'priority') {
+      setTimeout(() => {
+        const selectEl = inputRef.current;
+        if (selectEl && selectEl.tagName === 'SELECT') {
+          selectEl.focus();
+          selectEl.click();
+          // Try to trigger dropdown open
+          const event = new MouseEvent('mousedown', { bubbles: true });
+          selectEl.dispatchEvent(event);
+        }
+      }, 50);
+    }
+  };
+
+  // Removed unused edit handlers - now handled inline
 
   // Handle course duplication - navigate to create page with pre-filled data
   const handleDuplicateCourse = async (courseId) => {
@@ -995,6 +1093,120 @@ function CoursesPage() {
     refetchOnMount: false
   });
 
+  // Fetch priorities for inline editing dropdown
+  const { data: prioritiesData } = useQuery({
+    queryKey: ['priorities'],
+    queryFn: async () => {
+      const response = await priorities.getAll();
+      return response.data?.data || response.data || [];
+    }
+  });
+
+  // Fetch modalities for display names
+  const { data: modalitiesData } = useQuery({
+    queryKey: ['modalities'],
+    queryFn: async () => {
+      const response = await modalities.getAll();
+      return response.data?.data || response.data || [];
+    }
+  });
+
+  // Mutation for updating course fields inline
+  const updateCourseMutation = useMutation({
+    mutationFn: async ({ courseId, updates }) => {
+      // Ensure we're sending valid data
+      const cleanUpdates = {};
+      Object.keys(updates).forEach(key => {
+        if (updates[key] !== undefined) {
+          cleanUpdates[key] = updates[key];
+        }
+      });
+      
+      // Make the API call directly without any delays
+      return await courses.update(courseId, cleanUpdates);
+    },
+    onMutate: async ({ courseId, updates }) => {
+      // Clear editing state immediately on mutate
+      setEditingCell(null);
+      setEditValues({});
+      
+      // Cancel any outgoing refetches to prevent interference
+      await queryClient.cancelQueries({ queryKey: ['courses'] });
+      
+      // Snapshot the previous value
+      const previousCourses = queryClient.getQueryData(['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { list_id: listId }]);
+      
+      // Optimistically update
+      queryClient.setQueryData(['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { list_id: listId }], (old) => {
+        if (!old) return old;
+        
+        const updateCourseInData = (data) => {
+          // Handle API response structure with data.data.courses
+          if (data?.data?.data?.courses && Array.isArray(data.data.data.courses)) {
+            return {
+              ...data,
+              data: {
+                ...data.data,
+                data: {
+                  ...data.data.data,
+                  courses: data.data.data.courses.map(course => 
+                    course.id === courseId 
+                      ? { ...course, ...updates }
+                      : course
+                  )
+                }
+              }
+            };
+          }
+          
+          // Handle API response structure with data.courses
+          if (data?.data?.courses && Array.isArray(data.data.courses)) {
+            return {
+              ...data,
+              data: {
+                ...data.data,
+                courses: data.data.courses.map(course => 
+                  course.id === courseId 
+                    ? { ...course, ...updates }
+                    : course
+                )
+              }
+            };
+          }
+          
+          return data;
+        };
+        
+        return updateCourseInData(old);
+      });
+      
+      // Return context with snapshot
+      return { previousCourses };
+    },
+    onSuccess: (response, variables) => {
+      toast.success('Course updated successfully');
+    },
+    onError: (error, variables, context) => {
+      console.error('Update error:', error);
+      console.error('Error response:', error.response?.data);
+      
+      // Rollback on error
+      if (context?.previousCourses) {
+        queryClient.setQueryData(['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { list_id: listId }], context.previousCourses);
+      }
+      
+      const errorMessage = error.response?.data?.error?.message || 
+                          error.response?.data?.message || 
+                          'Failed to update course';
+      toast.error(errorMessage);
+      setEditingCell(null);
+      setEditValues({});
+    },
+    // Disable retry and set to run immediately
+    retry: false,
+    networkMode: 'always'
+  });
+
   const workflowTransitionMutation = useMutation({
     mutationFn: ({ courseId, newState, notes }) => 
       courses.transitionWorkflow(courseId, newState, notes),
@@ -1198,7 +1410,7 @@ function CoursesPage() {
           value = `${Math.round(progress)}%`;
           break;
         case 'modality':
-          value = course.modality;
+          value = getModalityDisplayName(course.modality, modalitiesData);
           break;
         case 'priority':
           value = course.priority;
@@ -1719,38 +1931,231 @@ function CoursesPage() {
                             {/* Modality Column */}
                             <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getModalityColor(course.modality)}`}>
-                                {course.modality || 'N/A'}
+                                {getModalityDisplayName(course.modality, modalitiesData)}
                               </span>
                             </td>
 
                             {/* Priority Column */}
-                            <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')}`}>
-                                {course.priority || 'Low'}
-                              </span>
+                            <td className="px-6 py-1 overflow-visible text-sm text-gray-900 dark:text-white relative">
+                              {editingCell?.courseId === course.id && editingCell?.field === 'priority' ? (
+                                <div className="relative" ref={dropdownRef}>
+                                  <button
+                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')} ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-gray-800`}
+                                  >
+                                    {course.priority ? course.priority.charAt(0).toUpperCase() + course.priority.slice(1) : 'Select'}
+                                  </button>
+                                  <div className="fixed z-[9999] mt-1 w-36 bg-white dark:bg-gray-800 rounded-md shadow-xl ring-1 ring-black ring-opacity-5" style={{ 
+                                    zIndex: 9999,
+                                    top: dropdownRef.current ? `${dropdownRef.current.getBoundingClientRect().bottom + 5}px` : 'auto',
+                                    left: dropdownRef.current ? `${dropdownRef.current.getBoundingClientRect().left}px` : 'auto'
+                                  }}>
+                                    <div className="py-1" role="menu">
+                                      {prioritiesData && prioritiesData.length > 0 ? (
+                                        prioritiesData.map(priority => (
+                                          <button
+                                            key={priority.id}
+                                            onClick={() => {
+                                              // Close dropdown immediately
+                                              setEditingCell(null);
+                                              setEditValues({ [`${course.id}-priority`]: priority.value });
+                                              updateCourseMutation.mutate({ 
+                                                courseId: course.id, 
+                                                updates: { priority: priority.value } 
+                                              });
+                                            }}
+                                            className="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700 focus:outline-none transition-colors"
+                                            role="menuitem"
+                                          >
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(priority.value, 'badge')}`}>
+                                              {priority.label}
+                                            </span>
+                                          </button>
+                                        ))
+                                      ) : (
+                                        // Fallback if API fails
+                                        ['low', 'normal', 'high', 'urgent'].map((priorityValue) => (
+                                          <button
+                                            key={priorityValue}
+                                            onClick={async () => {
+                                              // Close dropdown immediately
+                                              setEditingCell(null);
+                                              setEditValues({ [`${course.id}-priority`]: priorityValue });
+                                              
+                                              // Update UI optimistically
+                                              const queryKey = ['courses', user?.role === 'admin' ? 'all' : 'user', user?.id, { list_id: listId }];
+                                              const previousData = queryClient.getQueryData(queryKey);
+                                              
+                                              queryClient.setQueryData(queryKey, (old) => {
+                                                if (!old) return old;
+                                                
+                                                // Handle API response structure with data.data.courses
+                                                if (old?.data?.data?.courses && Array.isArray(old.data.data.courses)) {
+                                                  return {
+                                                    ...old,
+                                                    data: {
+                                                      ...old.data,
+                                                      data: {
+                                                        ...old.data.data,
+                                                        courses: old.data.data.courses.map(c => 
+                                                          c.id === course.id 
+                                                            ? { ...c, priority: priorityValue }
+                                                            : c
+                                                        )
+                                                      }
+                                                    }
+                                                  };
+                                                }
+                                                
+                                                // Handle API response structure with data.courses
+                                                if (old?.data?.courses && Array.isArray(old.data.courses)) {
+                                                  return {
+                                                    ...old,
+                                                    data: {
+                                                      ...old.data,
+                                                      courses: old.data.courses.map(c => 
+                                                        c.id === course.id 
+                                                          ? { ...c, priority: priorityValue }
+                                                          : c
+                                                      )
+                                                    }
+                                                  };
+                                                }
+                                                
+                                                return old;
+                                              });
+                                              
+                                              // Make API call directly without mutation queue
+                                              try {
+                                                await courses.update(course.id, { priority: priorityValue });
+                                                toast.success('Priority updated successfully');
+                                              } catch (error) {
+                                                console.error('Update error:', error);
+                                                // Rollback on error
+                                                queryClient.setQueryData(queryKey, previousData);
+                                                toast.error('Failed to update priority');
+                                              }
+                                            }}
+                                            className="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700 focus:outline-none transition-colors"
+                                            role="menuitem"
+                                          >
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(priorityValue, 'badge')}`}>
+                                              {priorityValue.charAt(0).toUpperCase() + priorityValue.slice(1)}
+                                            </span>
+                                          </button>
+                                        ))
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => handleEditCell(course.id, 'priority', course.priority)}
+                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')} hover:ring-2 hover:ring-blue-500 hover:ring-offset-1 dark:hover:ring-offset-gray-800 transition-all`}
+                                >
+                                  {course.priority ? course.priority.charAt(0).toUpperCase() + course.priority.slice(1) : 'Low'}
+                                </button>
+                              )}
                             </td>
 
                             {/* Start Date Column */}
                             <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                              {(course.startDate || course.start_date) ? (
-                                <div className="flex items-center">
-                                  <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
-                                  <span className="truncate">{formatDate(course.startDate || course.start_date)}</span>
-                                </div>
+                              {editingCell?.courseId === course.id && editingCell?.field === 'start_date' ? (
+                                <input
+                                  ref={inputRef}
+                                  type="date"
+                                  value={editValues[`${course.id}-start_date`] || ''}
+                                  onChange={(e) => {
+                                    const newValue = e.target.value;
+                                    setEditValues({ [`${course.id}-start_date`]: newValue });
+                                    // Only update if value changed
+                                    if (newValue && newValue !== formatDateForInput(course.start_date || course.startDate)) {
+                                      // Add time to ensure correct date
+                                      updateCourseMutation.mutate({ 
+                                        courseId: course.id, 
+                                        updates: { startDate: `${newValue}T12:00:00` } 
+                                      });
+                                    } else if (!newValue && (course.start_date || course.startDate)) {
+                                      // Clear the date
+                                      updateCourseMutation.mutate({ 
+                                        courseId: course.id, 
+                                        updates: { startDate: null } 
+                                      });
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Escape') {
+                                      setEditingCell(null);
+                                      setEditValues({});
+                                    }
+                                  }}
+                                  className="block w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                  autoFocus
+                                />
                               ) : (
-                                <span className="text-gray-400">—</span>
+                                <button
+                                  onClick={() => handleEditCell(course.id, 'start_date', course.start_date || course.startDate)}
+                                  className="flex items-center hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1 py-0.5 transition-colors w-full"
+                                >
+                                  {(course.startDate || course.start_date) ? (
+                                    <>
+                                      <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                                      <span className="truncate">{formatDate(course.startDate || course.start_date)}</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-gray-400">Click to set</span>
+                                  )}
+                                </button>
                               )}
                             </td>
 
                             {/* Due Date Column */}
                             <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                              {(course.dueDate || course.due_date) ? (
-                                <div className="flex items-center">
-                                  <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
-                                  <span className="truncate">{formatDate(course.dueDate || course.due_date)}</span>
-                                </div>
+                              {editingCell?.courseId === course.id && editingCell?.field === 'due_date' ? (
+                                <input
+                                  ref={inputRef}
+                                  type="date"
+                                  value={editValues[`${course.id}-due_date`] || ''}
+                                  onChange={(e) => {
+                                    const newValue = e.target.value;
+                                    setEditValues({ [`${course.id}-due_date`]: newValue });
+                                    // Only update if value changed
+                                    if (newValue && newValue !== formatDateForInput(course.due_date || course.dueDate)) {
+                                      // Add time to ensure correct date
+                                      updateCourseMutation.mutate({ 
+                                        courseId: course.id, 
+                                        updates: { dueDate: `${newValue}T12:00:00` } 
+                                      });
+                                    } else if (!newValue && (course.due_date || course.dueDate)) {
+                                      // Clear the date
+                                      updateCourseMutation.mutate({ 
+                                        courseId: course.id, 
+                                        updates: { dueDate: null } 
+                                      });
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Escape') {
+                                      setEditingCell(null);
+                                      setEditValues({});
+                                    }
+                                  }}
+                                  className="block w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                                  autoFocus
+                                />
                               ) : (
-                                <span className="text-gray-400">—</span>
+                                <button
+                                  onClick={() => handleEditCell(course.id, 'due_date', course.due_date || course.dueDate)}
+                                  className="flex items-center hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1 py-0.5 transition-colors w-full"
+                                >
+                                  {(course.dueDate || course.due_date) ? (
+                                    <>
+                                      <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                                      <span className="truncate">{formatDate(course.dueDate || course.due_date)}</span>
+                                    </>
+                                  ) : (
+                                    <span className="text-gray-400">Click to set</span>
+                                  )}
+                                </button>
                               )}
                             </td>
 
@@ -1956,38 +2361,163 @@ function CoursesPage() {
                         {/* Modality Column */}
                         <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getModalityColor(course.modality)}`}>
-                            {course.modality || 'N/A'}
+                            {getModalityDisplayName(course.modality, modalitiesData)}
                           </span>
                         </td>
 
                         {/* Priority Column */}
-                        <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')}`}>
-                            {course.priority || 'Low'}
-                          </span>
+                        <td className="px-6 py-1 overflow-visible text-sm text-gray-900 dark:text-white relative">
+                          {editingCell?.courseId === course.id && editingCell?.field === 'priority' ? (
+                            <div className="relative" ref={dropdownRef}>
+                              <button
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')} ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-gray-800`}
+                              >
+                                {course.priority ? course.priority.charAt(0).toUpperCase() + course.priority.slice(1) : 'Select'}
+                              </button>
+                              <div className="fixed z-[9999] mt-1 w-36 bg-white dark:bg-gray-800 rounded-md shadow-xl ring-1 ring-black ring-opacity-5" style={{ 
+                                zIndex: 9999,
+                                top: dropdownRef.current ? `${dropdownRef.current.getBoundingClientRect().bottom + 5}px` : 'auto',
+                                left: dropdownRef.current ? `${dropdownRef.current.getBoundingClientRect().left}px` : 'auto'
+                              }}>
+                                <div className="py-1" role="menu">
+                                  {prioritiesData && prioritiesData.length > 0 ? (
+                                    prioritiesData.map(priority => (
+                                      <button
+                                        key={priority.id}
+                                        onClick={() => {
+                                          // Close dropdown immediately
+                                          setEditingCell(null);
+                                          setEditValues({ [`${course.id}-priority`]: priority.value });
+                                          updateCourseMutation.mutate({ 
+                                            courseId: course.id, 
+                                            updates: { priority: priority.value } 
+                                          });
+                                        }}
+                                        className="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700 focus:outline-none transition-colors"
+                                        role="menuitem"
+                                      >
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(priority.value, 'badge')}`}>
+                                          {priority.label}
+                                        </span>
+                                      </button>
+                                    ))
+                                  ) : (
+                                    // Fallback if API fails
+                                    ['low', 'normal', 'high', 'urgent'].map((priorityValue) => (
+                                      <button
+                                        key={priorityValue}
+                                        onClick={() => {
+                                          // Close dropdown immediately
+                                          setEditingCell(null);
+                                          setEditValues({ [`${course.id}-priority`]: priorityValue });
+                                          updateCourseMutation.mutate({ 
+                                            courseId: course.id, 
+                                            updates: { priority: priorityValue } 
+                                          });
+                                        }}
+                                        className="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700 focus:outline-none transition-colors"
+                                        role="menuitem"
+                                      >
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(priorityValue, 'badge')}`}>
+                                          {priorityValue.charAt(0).toUpperCase() + priorityValue.slice(1)}
+                                        </span>
+                                      </button>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleEditCell(course.id, 'priority', course.priority)}
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(course.priority, 'badge')} hover:ring-2 hover:ring-blue-500 hover:ring-offset-1 dark:hover:ring-offset-gray-800 transition-all`}
+                            >
+                              {course.priority ? course.priority.charAt(0).toUpperCase() + course.priority.slice(1) : 'Low'}
+                            </button>
+                          )}
                         </td>
 
                         {/* Start Date Column */}
                         <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                          {(course.startDate || course.start_date) ? (
-                            <div className="flex items-center">
-                              <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
-                              <span className="truncate">{formatDate(course.startDate || course.start_date)}</span>
-                            </div>
+                          {editingCell?.courseId === course.id && editingCell?.field === 'start_date' ? (
+                            <input
+                              ref={inputRef}
+                              type="date"
+                              value={editValues[`${course.id}-start_date`] || ''}
+                              onChange={(e) => {
+                                const newValue = e.target.value;
+                                setEditValues({ [`${course.id}-start_date`]: newValue });
+                                // Save immediately
+                                updateCourseMutation.mutate({ 
+                                  courseId: course.id, 
+                                  updates: { startDate: newValue || null } 
+                                });
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  setEditingCell(null);
+                                  setEditValues({});
+                                }
+                              }}
+                              className="block w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                              autoFocus
+                            />
                           ) : (
-                            <span className="text-gray-400">—</span>
+                            <button
+                              onClick={() => handleEditCell(course.id, 'start_date', course.start_date || course.startDate)}
+                              className="flex items-center hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1 py-0.5 transition-colors w-full"
+                            >
+                              {(course.startDate || course.start_date) ? (
+                                <>
+                                  <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                                  <span className="truncate">{formatDate(course.startDate || course.start_date)}</span>
+                                </>
+                              ) : (
+                                <span className="text-gray-400">Click to set</span>
+                              )}
+                            </button>
                           )}
                         </td>
 
                         {/* Due Date Column */}
                         <td className="px-6 py-1 overflow-hidden text-sm text-gray-900 dark:text-white">
-                          {(course.dueDate || course.due_date) ? (
-                            <div className="flex items-center">
-                              <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
-                              <span className="truncate">{formatDate(course.dueDate || course.due_date)}</span>
-                            </div>
+                          {editingCell?.courseId === course.id && editingCell?.field === 'due_date' ? (
+                            <input
+                              ref={inputRef}
+                              type="date"
+                              value={editValues[`${course.id}-due_date`] || ''}
+                              onChange={(e) => {
+                                const newValue = e.target.value;
+                                setEditValues({ [`${course.id}-due_date`]: newValue });
+                                // Save immediately
+                                updateCourseMutation.mutate({ 
+                                  courseId: course.id, 
+                                  updates: { dueDate: newValue || null } 
+                                });
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                  setEditingCell(null);
+                                  setEditValues({});
+                                }
+                              }}
+                              className="block w-full px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                              autoFocus
+                            />
                           ) : (
-                            <span className="text-gray-400">—</span>
+                            <button
+                              onClick={() => handleEditCell(course.id, 'due_date', course.due_date || course.dueDate)}
+                              className="flex items-center hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1 py-0.5 transition-colors w-full"
+                            >
+                              {(course.dueDate || course.due_date) ? (
+                                <>
+                                  <Calendar className="h-4 w-4 mr-1 text-gray-400 flex-shrink-0" />
+                                  <span className="truncate">{formatDate(course.dueDate || course.due_date)}</span>
+                                </>
+                              ) : (
+                                <span className="text-gray-400">Click to set</span>
+                              )}
+                            </button>
                           )}
                         </td>
 
@@ -2193,7 +2723,8 @@ function CourseProgress({ courseId, fallbackPercentage = 0 }) {
   const { data: courseData, isLoading: courseLoading, error: courseError } = useQuery({
     queryKey: ['course', courseId],
     queryFn: () => courses.getById(courseId),
-    staleTime: 5 * 60 * 1000 // 5 minutes
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: false // Disable auto-fetch - we already have course data from parent
   });
   
   const { data: phaseStatusesData, isLoading: statusLoading, error: statusError } = useQuery({
@@ -2357,10 +2888,11 @@ function CoursePhases({ courseId }) {
     };
   }, [editingTaskId, editingDate, editingAssignmentId]);
   
-  const { data: courseData, isLoading } = useQuery({
+  const { data: courseData, isLoading, error } = useQuery({
     queryKey: ['course', courseId],
     queryFn: () => courses.getById(courseId),
-    staleTime: 5 * 60 * 1000 // 5 minutes
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: !!courseId // Only fetch if we have a courseId
   });
 
   const updateSubtaskMutation = useMutation({
@@ -2554,7 +3086,10 @@ function CoursePhases({ courseId }) {
     setTempAssignment({});
   };
 
-  const subtasks = courseData?.data?.data?.subtasks || [];
+  const subtasks = courseData?.data?.subtasks || 
+                   courseData?.subtasks || 
+                   courseData?.data?.data?.subtasks || 
+                   [];
 
   // Auto-clear tempStatus when server data matches what we expect
   React.useEffect(() => {

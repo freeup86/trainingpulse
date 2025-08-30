@@ -32,7 +32,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Button } from '../components/ui/Button';
 import { useAuth } from '../hooks/useAuth';
 import { usePermissions } from '../hooks/usePermissions';
-import { statuses, users, roles, permissions, phaseStatuses, modalityTasks, priorities } from '../lib/api';
+import { statuses, users, roles, permissions, phaseStatuses, modalities, modalityTasks, priorities } from '../lib/api';
 import Breadcrumb from '../components/navigation/Breadcrumb';
 import ProgramsTab from '../components/admin/ProgramsTab';
 import CustomFieldsTab from '../components/admin/CustomFieldsTab';
@@ -146,13 +146,15 @@ export default function AdminPage() {
     weight_percentage: 100
   });
 
-  const MODALITY_OPTIONS = [
-    { value: 'WBT', label: 'WBT (Web-Based Training)' },
-    { value: 'ILT/VLT', label: 'ILT/VLT (Instructor-Led/Virtual-Led Training)' },
-    { value: 'Micro Learning', label: 'Micro Learning' },
-    { value: 'SIMS', label: 'SIMS (Software Simulations)' },
-    { value: 'DAP', label: 'DAP (Digital Adoption Platform)' }
-  ];
+  // Modality management state
+  const [editingModality, setEditingModality] = useState(null);
+  const [isCreatingModality, setIsCreatingModality] = useState(false);
+  const [modalityFormData, setModalityFormData] = useState({
+    value: '',
+    name: '',
+    description: '',
+    sort_order: 0
+  });
 
   // Fetch statuses (always call hooks before any returns)
   const { data: statusesData, isLoading, error } = useQuery({
@@ -246,6 +248,22 @@ export default function AdminPage() {
     },
     onError: (error) => {
       toast.error('Failed to update priority: ' + (error.response?.data?.error?.message || error.message));
+    }
+  });
+
+  // Separate mutation for setting default priority - doesn't invalidate other queries
+  const setDefaultPriorityMutation = useMutation({
+    mutationFn: async ({ id, data }) => {
+      const response = await priorities.update(id, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      // Only invalidate priorities, not courses
+      queryClient.invalidateQueries(['admin-priorities']);
+      queryClient.invalidateQueries(['priorities']); // This is used by the dropdown
+    },
+    onError: (error) => {
+      toast.error('Failed to update default priority: ' + (error.response?.data?.error?.message || error.message));
     }
   });
 
@@ -378,6 +396,32 @@ export default function AdminPage() {
   const handleDeletePriority = (priority) => {
     if (window.confirm(`Are you sure you want to delete the priority "${priority.label}"?`)) {
       deletePriorityMutation.mutate(priority.id);
+    }
+  };
+
+  const handleSetDefaultPriority = async (priorityId) => {
+    // Show immediate feedback
+    const startTime = Date.now();
+    console.log(`Starting priority update at ${new Date().toISOString()}`);
+    toast.loading('Updating default priority...');
+    
+    try {
+      // Make a single API call to update the priority as default
+      // The backend will handle unsetting other defaults efficiently
+      await setDefaultPriorityMutation.mutateAsync({ 
+        id: priorityId, 
+        data: { is_default: true } 
+      });
+      
+      const duration = Date.now() - startTime;
+      console.log(`Priority update completed in ${duration}ms`);
+      
+      toast.dismiss(); // Dismiss loading toast
+      toast.success('Default priority updated');
+    } catch (error) {
+      console.error('Error setting default priority:', error);
+      toast.dismiss(); // Dismiss loading toast
+      toast.error('Failed to update default priority');
     }
   };
 
@@ -557,6 +601,72 @@ export default function AdminPage() {
     }
   };
 
+  // Fetch modalities
+  const { data: modalitiesData = [], isLoading: modalitiesLoading, error: modalitiesError } = useQuery({
+    queryKey: ['admin-modalities'],
+    queryFn: async () => {
+      const response = await modalities.getAll();
+      return response.data.data || [];
+    }
+  });
+  
+  // Compatibility fallback for cached code that might still reference MODALITY_OPTIONS
+  const MODALITY_OPTIONS = modalitiesData?.map(m => ({ 
+    value: m.value, 
+    label: m.name + (m.description ? ` (${m.description})` : '')
+  })) || [
+    { value: 'WBT', label: 'WBT (Web-Based Training)' },
+    { value: 'ILT/VLT', label: 'ILT/VLT (Instructor-Led/Virtual-Led Training)' },
+    { value: 'Micro Learning', label: 'Micro Learning' },
+    { value: 'SIMS', label: 'SIMS (Software Simulations)' },
+    { value: 'DAP', label: 'DAP (Digital Adoption Platform)' }
+  ];
+
+  // Modality mutations
+  const createModalityMutation = useMutation({
+    mutationFn: async (data) => {
+      const response = await modalities.create(data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-modalities']);
+      toast.success('Modality created successfully');
+      resetModalityForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to create modality: ' + (error.response?.data?.error?.message || error.message));
+    }
+  });
+
+  const updateModalityMutation = useMutation({
+    mutationFn: async ({ id, updates }) => {
+      const response = await modalities.update(id, updates);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-modalities']);
+      toast.success('Modality updated successfully');
+      resetModalityForm();
+    },
+    onError: (error) => {
+      toast.error('Failed to update modality: ' + (error.response?.data?.error?.message || error.message));
+    }
+  });
+
+  const deleteModalityMutation = useMutation({
+    mutationFn: async (id) => {
+      const response = await modalities.delete(id);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['admin-modalities']);
+      toast.success('Modality deleted successfully');
+    },
+    onError: (error) => {
+      toast.error('Failed to delete modality: ' + (error.response?.data?.error?.message || error.message));
+    }
+  });
+
   // Modality tasks queries and mutations
   const { data: modalityTasksData, isLoading: modalityTasksLoading, error: modalityTasksError } = useQuery({
     queryKey: ['admin-modality-tasks'],
@@ -609,6 +719,72 @@ export default function AdminPage() {
       toast.error('Failed to delete modality task: ' + (error.response?.data?.error?.message || error.response?.data?.message || error.message));
     }
   });
+
+  // Modality management functions
+  const resetModalityForm = () => {
+    setModalityFormData({
+      value: '',
+      name: '',
+      description: '',
+      sort_order: 0
+    });
+    setEditingModality(null);
+    setIsCreatingModality(false);
+  };
+
+  const handleCreateModality = () => {
+    setEditingModality(null);
+    setModalityFormData({
+      value: '',
+      name: '',
+      description: '',
+      sort_order: (modalitiesData?.length || 0) + 1
+    });
+    setIsCreatingModality(true);
+  };
+
+  const handleEditModality = (modality) => {
+    setEditingModality(modality.id);
+    setModalityFormData({
+      value: modality.value,
+      name: modality.name,
+      description: modality.description || '',
+      sort_order: modality.sort_order || 0
+    });
+    setIsCreatingModality(false);
+  };
+
+  const handleModalitySubmit = (e) => {
+    e.preventDefault();
+    
+    if (!modalityFormData.name.trim()) {
+      toast.error('Modality name is required');
+      return;
+    }
+
+    if (editingModality) {
+      updateModalityMutation.mutate({
+        id: editingModality,
+        updates: {
+          name: modalityFormData.name,
+          description: modalityFormData.description,
+          sort_order: modalityFormData.sort_order
+        }
+      });
+    } else {
+      if (!modalityFormData.value.trim()) {
+        toast.error('Modality value is required');
+        return;
+      }
+      createModalityMutation.mutate(modalityFormData);
+    }
+  };
+
+  const handleDeleteModality = (modality) => {
+    if (window.confirm(`Are you sure you want to delete the modality "${modality.name}"? This cannot be undone.`)) {
+      deleteModalityMutation.mutate(modality.id);
+    }
+  };
 
   const resetModalityTaskForm = () => {
     setModalityTaskFormData({
@@ -1750,6 +1926,24 @@ export default function AdminPage() {
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
+                      {!priority.is_default ? (
+                        <button
+                          onClick={() => handleSetDefaultPriority(priority.id)}
+                          disabled={deletePriorityMutation.isLoading || setDefaultPriorityMutation.isLoading}
+                          className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Set as default priority"
+                        >
+                          <Star className="h-4 w-4 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400" />
+                        </button>
+                      ) : (
+                        <button
+                          disabled
+                          className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-300 dark:border-blue-700 cursor-not-allowed"
+                          title="Current default priority"
+                        >
+                          <Star className="h-4 w-4 text-blue-600 dark:text-blue-400 fill-current" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleEditPriority(priority)}
                         disabled={deletePriorityMutation.isLoading}
@@ -1759,8 +1953,9 @@ export default function AdminPage() {
                       </button>
                       <button
                         onClick={() => handleDeletePriority(priority)}
-                        disabled={deletePriorityMutation.isLoading}
+                        disabled={deletePriorityMutation.isLoading || priority.is_default}
                         className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={priority.is_default ? "Cannot delete default priority" : "Delete priority"}
                       >
                         <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
                       </button>
@@ -1794,27 +1989,145 @@ export default function AdminPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* Modality Selector */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Select Modality
-              </label>
-              <select
-                value={selectedModality}
-                onChange={(e) => {
-                  setSelectedModality(e.target.value);
-                  setModalityTaskFormData(prev => ({ ...prev, modality: e.target.value }));
-                  resetModalityTaskForm();
-                }}
-                className="w-64 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-              >
-                {MODALITY_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+            {/* Modality Management Section */}
+            <div className="mb-8 border-b border-gray-200 dark:border-gray-700 pb-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Modality Types</h3>
+                {!isCreatingModality && !editingModality && (
+                  <Button onClick={handleCreateModality} size="sm">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Modality
+                  </Button>
+                )}
+              </div>
+
+              {/* Modality Form */}
+              {(isCreatingModality || editingModality) && (
+                <form onSubmit={handleModalitySubmit} className="mb-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {isCreatingModality && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Value (Internal ID) *
+                        </label>
+                        <input
+                          type="text"
+                          value={modalityFormData.value}
+                          onChange={(e) => setModalityFormData(prev => ({ ...prev, value: e.target.value.toUpperCase().replace(/\s+/g, '_') }))}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="e.g., WBT, ILT_VLT"
+                          required
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Used internally, no spaces</p>
+                      </div>
+                    )}
+                    <div className={isCreatingModality ? '' : 'md:col-span-2'}>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Name *
+                      </label>
+                      <input
+                        type="text"
+                        value={modalityFormData.name}
+                        onChange={(e) => setModalityFormData(prev => ({ ...prev, name: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        placeholder="e.g., WBT, ILT/VLT"
+                        required
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Description
+                      </label>
+                      <input
+                        type="text"
+                        value={modalityFormData.description}
+                        onChange={(e) => setModalityFormData(prev => ({ ...prev, description: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                        placeholder="e.g., Web-Based Training"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end space-x-3 mt-4">
+                    <Button type="button" variant="outline" onClick={resetModalityForm}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={createModalityMutation.isPending || updateModalityMutation.isPending}>
+                      {createModalityMutation.isPending || updateModalityMutation.isPending ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4 mr-2" />
+                          {isCreatingModality ? 'Create' : 'Update'} Modality
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </form>
+              )}
+
+              {/* Modalities List */}
+              {modalitiesLoading ? (
+                <div className="text-center py-4 text-gray-600 dark:text-gray-300">Loading modalities...</div>
+              ) : modalitiesData && modalitiesData.length > 0 ? (
+                <div className="space-y-2">
+                  {modalitiesData
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((modality) => (
+                      <div
+                        key={modality.id}
+                        className={`flex items-center justify-between p-3 border rounded-lg transition-colors ${
+                          selectedModality === modality.value
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                            : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                        }`}
+                      >
+                        <button
+                          onClick={() => {
+                            setSelectedModality(modality.value);
+                            setModalityTaskFormData(prev => ({ ...prev, modality: modality.value }));
+                          }}
+                          className="flex-1 text-left"
+                        >
+                          <div>
+                            <span className="font-medium text-gray-900 dark:text-white">{modality.name}</span>
+                            {modality.description && (
+                              <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">({modality.description})</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Value: {modality.value}</p>
+                        </button>
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleEditModality(modality)}
+                            className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                          >
+                            <Edit3 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteModality(modality)}
+                            disabled={deleteModalityMutation.isPending}
+                            className="p-2 bg-white dark:bg-gray-700 rounded-md border border-gray-300 dark:border-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                  <Layers className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                  <p className="text-gray-500 dark:text-gray-400">No modalities configured</p>
+                  <p className="text-sm text-gray-400 dark:text-gray-500">Add modalities to organize your course types</p>
+                </div>
+              )}
             </div>
+
+            {/* Phase Management Section */}
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
+                Phases for {modalitiesData?.find(m => m.value === selectedModality)?.name || selectedModality}
+              </h3>
 
             {/* Task Form */}
             {(isCreatingModalityTask || editingModalityTask) && (
@@ -1899,7 +2212,7 @@ export default function AdminPage() {
             <div>
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Phases for {MODALITY_OPTIONS.find(opt => opt.value === selectedModality)?.label}
+                  Phases for {modalitiesData?.find(m => m.value === selectedModality)?.name || selectedModality}
                 </h3>
                 {!isCreatingModalityTask && !editingModalityTask && (
                   <Button onClick={handleCreateModalityTask}>
@@ -1969,6 +2282,7 @@ export default function AdminPage() {
                   )}
                 </div>
               )}
+            </div>
             </div>
           </CardContent>
         </Card>

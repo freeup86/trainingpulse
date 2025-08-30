@@ -4,7 +4,7 @@ const { authorize } = require('../middleware/authenticate');
 
 const router = express.Router();
 
-// Get all modality tasks (grouped by modality)
+// Get all modality tasks (grouped by modality) - must come before /:id routes
 router.get('/tasks', modalityController.getAllModalityTasks);
 
 // Get tasks for a specific modality
@@ -21,5 +21,12 @@ router.delete('/tasks/:id', authorize(['admin']), modalityController.deleteModal
 
 // Reorder modality tasks (admin only)
 router.post('/tasks/reorder', authorize(['admin']), modalityController.reorderModalityTasks);
+
+// Modality management routes
+router.get('/', modalityController.getAllModalities);
+router.post('/', authorize(['admin']), modalityController.createModality);
+router.get('/:id', modalityController.getModalityById);
+router.put('/:id', authorize(['admin']), modalityController.updateModality);
+router.delete('/:id', authorize(['admin']), modalityController.deleteModality);
 
 module.exports = router;

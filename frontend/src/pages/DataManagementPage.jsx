@@ -27,7 +27,7 @@ import {
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
-import { courses, users, bulk, programs, folders, lists, statuses } from '../lib/api';
+import { courses, users, bulk, programs, folders, lists, statuses, priorities } from '../lib/api';
 import { formatDate, getStatusColor, getPriorityColor } from '../lib/utils';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -55,10 +55,10 @@ const BULK_OPERATIONS = [
     color: 'text-orange-600'
   },
   {
-    id: 'workflow_transition',
-    name: 'Workflow Transition',
-    description: 'Move courses to the next workflow stage',
-    icon: ArrowRight,
+    id: 'move_course',
+    name: 'Move Course',
+    description: 'Move courses to a new folder or list within the current program',
+    icon: Folder,
     color: 'text-purple-600'
   },
   {
@@ -70,7 +70,6 @@ const BULK_OPERATIONS = [
   }
 ];
 
-const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const STATUS_OPTIONS = ['draft', 'in_progress', 'review', 'completed', 'cancelled'];
 
 const MODALITIES = [
@@ -120,6 +119,15 @@ function DataManagementPage() {
     }
   });
   
+  // Fetch priorities data
+  const { data: prioritiesData } = useQuery({
+    queryKey: ['priorities'],
+    queryFn: async () => {
+      const response = await priorities.getAll();
+      return response.data?.data || response.data || [];
+    }
+  });
+
   // Fetch programs data
   const { data: programsData } = useQuery({
     queryKey: ['programs'],
@@ -985,6 +993,10 @@ function DataManagementPage() {
           setShowOperationModal={setShowOperationModal}
           setSelectedOperation={setSelectedOperation}
           executeBulkOperation={executeBulkOperation}
+          prioritiesData={prioritiesData}
+          programsData={programsData}
+          foldersData={foldersData}
+          listsData={listsData}
         />
       )}
     </div>
@@ -1010,7 +1022,11 @@ function BulkOperationsTab({
   handleExecuteOperation,
   setShowOperationModal,
   setSelectedOperation,
-  executeBulkOperation
+  executeBulkOperation,
+  prioritiesData,
+  programsData,
+  foldersData,
+  listsData
 }) {
   return (
     <>
@@ -1228,6 +1244,12 @@ function BulkOperationsTab({
             setSelectedOperation(null);
           }}
           isExecuting={executeBulkOperation.isPending}
+          selectedCourses={selectedCourses}
+          coursesData={coursesList}
+          prioritiesData={prioritiesData}
+          programsData={programsData}
+          foldersData={foldersData}
+          listsData={listsData}
         />
       )}
     </>
@@ -1703,7 +1725,22 @@ function CourseImportTab({
 }
 
 // Bulk Operation Modal Component
-function BulkOperationModal({ operation, courseCount, users, params, onParamsChange, onExecute, onCancel, isExecuting }) {
+function BulkOperationModal({ 
+  operation, 
+  courseCount, 
+  users, 
+  params, 
+  onParamsChange, 
+  onExecute, 
+  onCancel, 
+  isExecuting,
+  selectedCourses,
+  coursesData,
+  prioritiesData,
+  programsData,
+  foldersData,
+  listsData
+}) {
   const Icon = operation.icon;
 
   const renderOperationFields = () => {
@@ -1765,9 +1802,9 @@ function BulkOperationModal({ operation, courseCount, users, params, onParamsCha
                 className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select priority...</option>
-                {PRIORITIES.map(priority => (
-                  <option key={priority} value={priority}>
-                    {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                {(prioritiesData || []).map(priority => (
+                  <option key={priority.value} value={priority.value}>
+                    {priority.label || priority.name || priority.value}
                   </option>
                 ))}
               </select>
@@ -1775,26 +1812,71 @@ function BulkOperationModal({ operation, courseCount, users, params, onParamsCha
           </div>
         );
 
-      case 'workflow_transition':
+      case 'move_course':
+        // Get the programs that have selected courses
+        const programsWithCourses = [...new Set(
+          Array.from(selectedCourses)
+            .map(courseId => coursesData?.find(c => c.id === courseId)?.program_id)
+            .filter(Boolean)
+        )];
+        
+        const selectedProgramId = params.programId || programsWithCourses[0];
+        const selectedProgram = programsData?.find(p => p.id === selectedProgramId);
+        const programFolders = foldersData?.filter(f => f.program_id === selectedProgramId) || [];
+        const selectedFolderId = params.folderId;
+        const folderLists = listsData?.filter(l => l.folder_id === selectedFolderId) || [];
+        
         return (
           <div className="space-y-4">
+            {programsWithCourses.length > 1 && (
+              <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  Selected courses are from multiple programs. Courses will only be moved within their current program.
+                </p>
+              </div>
+            )}
+            
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Target Status
+                Target Folder
               </label>
               <select
-                value={params.status || ''}
-                onChange={(e) => onParamsChange({ ...params, status: e.target.value })}
+                value={params.folderId || ''}
+                onChange={(e) => onParamsChange({ 
+                  ...params, 
+                  folderId: e.target.value,
+                  listId: '' // Reset list when folder changes
+                })}
                 className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
-                <option value="">Select status...</option>
-                {STATUS_OPTIONS.map(status => (
-                  <option key={status} value={status}>
-                    {status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                <option value="">Select folder...</option>
+                {programFolders.map(folder => (
+                  <option key={folder.id} value={folder.id}>
+                    {folder.name}
                   </option>
                 ))}
               </select>
             </div>
+            
+            {params.folderId && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Target List (Optional)
+                </label>
+                <select
+                  value={params.listId || ''}
+                  onChange={(e) => onParamsChange({ ...params, listId: e.target.value })}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="">No specific list</option>
+                  {folderLists.map(list => (
+                    <option key={list.id} value={list.id}>
+                      {list.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         );
 

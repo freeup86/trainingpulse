@@ -3,9 +3,12 @@ import axios from 'axios';
 // We'll set the baseURL dynamically in the interceptor
 const API_VERSION = import.meta.env.VITE_API_VERSION || 'v1';
 
+// Track active GET requests so we can cancel them if needed
+const activeGetRequests = new Map();
+
 // Create axios instance with dynamic baseURL
 const api = axios.create({
-  timeout: 30000, // Increased timeout to 30 seconds to handle slower requests
+  timeout: 30000, // 30 seconds timeout
   headers: {
     'Content-Type': 'application/json',
   },
@@ -25,6 +28,30 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     
+    // For PUT/POST/PATCH requests, cancel pending GET requests to free up the network
+    if (config.method && ['put', 'post', 'patch'].includes(config.method.toLowerCase())) {
+      // Cancel all pending GET requests for individual courses
+      activeGetRequests.forEach((controller, key) => {
+        if (key.includes('/courses/') && key.includes('GET')) {
+          controller.abort();
+          activeGetRequests.delete(key);
+        }
+      });
+    }
+    
+    // Track GET requests so we can cancel them later if needed
+    if (config.method === 'get' && config.url && config.url.includes('/courses/')) {
+      const controller = new AbortController();
+      config.signal = controller.signal;
+      const key = `${config.method.toUpperCase()}-${config.url}`;
+      activeGetRequests.set(key, controller);
+      
+      // Clean up when request completes
+      // Store the controller so we can clean it up later
+      // No need to wrap the adapter - just track for cleanup
+      config.signal = controller.signal;
+    }
+    
     return config;
   },
   (error) => {
@@ -34,8 +61,20 @@ api.interceptors.request.use(
 
 // Response interceptor to handle auth errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Clean up tracked GET requests
+    if (response.config) {
+      const key = `${response.config.method.toUpperCase()}-${response.config.url}`;
+      activeGetRequests.delete(key);
+    }
+    return response;
+  },
   async (error) => {
+    // Clean up tracked GET requests on error
+    if (error.config) {
+      const key = `${error.config.method.toUpperCase()}-${error.config.url}`;
+      activeGetRequests.delete(key);
+    }
     const originalRequest = error.config;
 
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -462,6 +501,23 @@ export const phaseStatuses = {
   
   reorder: (statusIds) =>
     api.post('/phase-statuses/reorder', { statusIds }),
+};
+
+export const modalities = {
+  getAll: () =>
+    api.get('/modality'),
+  
+  getById: (id) =>
+    api.get(`/modality/${id}`),
+  
+  create: (data) =>
+    api.post('/modality', data),
+  
+  update: (id, data) =>
+    api.put(`/modality/${id}`, data),
+  
+  delete: (id) =>
+    api.delete(`/modality/${id}`),
 };
 
 export const modalityTasks = {

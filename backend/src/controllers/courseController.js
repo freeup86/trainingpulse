@@ -8,8 +8,8 @@ const logger = require('../utils/logger');
 
 // Create dynamic validation schemas with valid priorities
 const createDynamicCourseSchema = async () => {
-  const { getValidPriorityValues } = require('./priorityController');
-  const validPriorities = await getValidPriorityValues();
+  // Use known valid priorities to avoid database call during schema creation
+  const knownValidPriorities = ['low', 'medium', 'high', 'critical', 'urgent', 'normal'];
   
   return Joi.object({
     title: Joi.string().min(3).max(255).required().trim(),
@@ -18,7 +18,7 @@ const createDynamicCourseSchema = async () => {
     modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
     listId: Joi.string().uuid().required(),
     deliverables: Joi.array().items(Joi.number().integer().positive()).min(1).required(),
-    priority: Joi.string().valid(...validPriorities).default('medium'),
+    priority: Joi.string().valid(...knownValidPriorities).default('medium'),
     ownerId: Joi.number().integer().positive().optional(),
     startDate: Joi.date().optional(),
     dueDate: Joi.date().optional().allow('').when('startDate', {
@@ -491,10 +491,11 @@ class CourseController {
 
       // Auto-create tasks based on modality
       const modalityTasks = await client.query(`
-        SELECT task_type, order_index
-        FROM modality_tasks
-        WHERE modality = $1
-        ORDER BY order_index
+        SELECT mt.task_type, mt.order_index
+        FROM modality_tasks mt
+        JOIN modalities m ON mt.modality_id = m.id
+        WHERE m.value = $1
+        ORDER BY mt.order_index
       `, [modality]);
 
       for (const task of modalityTasks.rows) {
@@ -825,21 +826,32 @@ class CourseController {
    * PUT /courses/:id - Update course
    */
   updateCourse = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
     const { id } = req.params;
+    logger.info(`[UPDATE COURSE ${id}] Started at ${new Date().toISOString()}`);
 
     // Validate priority if provided (before general validation)
     if (req.body.priority) {
-      const { getValidPriorityValues } = require('./priorityController');
-      const validPriorities = await getValidPriorityValues();
-      if (!validPriorities.includes(req.body.priority.toLowerCase())) {
-        throw new ValidationError('Invalid course data', [{
-          message: `"priority" must be one of [${validPriorities.join(', ')}]`,
-          path: ['priority'],
-          type: 'any.only'
-        }]);
+      // For known valid priorities from frontend dropdown, skip database validation
+      const knownValidPriorities = ['low', 'medium', 'high', 'critical', 'urgent', 'normal'];
+      const priorityLower = req.body.priority.toLowerCase();
+      
+      if (knownValidPriorities.includes(priorityLower)) {
+        // Fast path for known valid priorities - no database call needed
+        req.body.priority = priorityLower;
+      } else {
+        // Only do full validation for unknown values
+        const { getValidPriorityValues } = require('./priorityController');
+        const validPriorities = await getValidPriorityValues();
+        if (!validPriorities.includes(priorityLower)) {
+          throw new ValidationError('Invalid course data', [{
+            message: `"priority" must be one of [${validPriorities.join(', ')}]`,
+            path: ['priority'],
+            type: 'any.only'
+          }]);
+        }
+        req.body.priority = priorityLower;
       }
-      // Ensure priority is lowercase
-      req.body.priority = req.body.priority.toLowerCase();
     }
 
     // Validate input
@@ -981,10 +993,15 @@ class CourseController {
     // Trigger status recalculation if needed
     const significantChanges = ['type', 'status', 'dueDate'].some(field => changes[field]);
     if (significantChanges) {
+      logger.info(`[UPDATE COURSE ${id}] Running status aggregator at ${Date.now() - startTime}ms`);
       await this.statusAggregator.updateCourseStatus(id, { triggeredBy: req.user.id });
+      logger.info(`[UPDATE COURSE ${id}] Status aggregator complete at ${Date.now() - startTime}ms`);
+    } else {
+      logger.info(`[UPDATE COURSE ${id}] Skipping status aggregator (no significant changes) at ${Date.now() - startTime}ms`);
     }
 
-    logger.info('Course updated successfully', {
+    const totalTime = Date.now() - startTime;
+    logger.info(`[UPDATE COURSE ${id}] Completed in ${totalTime}ms at ${new Date().toISOString()}`, {
       courseId: id,
       changes: Object.keys(changes),
       userId: req.user.id
@@ -1346,10 +1363,11 @@ class CourseController {
 
     // Get tasks
     const tasks = await query(`
-      SELECT task_type, order_index
-      FROM modality_tasks
-      WHERE modality = $1
-      ORDER BY order_index
+      SELECT mt.task_type, mt.order_index
+      FROM modality_tasks mt
+      JOIN modalities m ON mt.modality_id = m.id
+      WHERE m.value = $1
+      ORDER BY mt.order_index
     `, [modality]);
 
     res.json({

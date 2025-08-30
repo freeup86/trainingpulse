@@ -1,24 +1,19 @@
-const { Pool } = require('pg');
+const { query } = require('../config/database');
 const logger = require('../utils/logger');
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? { rejectUnauthorized: false } : false
-});
 
 /**
  * Get all statuses
  */
 exports.getAllStatuses = async (req, res) => {
   try {
-    const query = `
+    const sql = `
       SELECT id, value, label, icon, color, order_index, is_active, created_at, updated_at
       FROM statuses 
       WHERE is_active = true
       ORDER BY order_index ASC, created_at ASC
     `;
     
-    const result = await pool.query(query);
+    const result = await query(sql);
     
     res.json({
       success: true,
@@ -43,13 +38,13 @@ exports.getStatusById = async (req, res) => {
   try {
     const { id } = req.params;
     
-    const query = `
+    const sql = `
       SELECT id, value, label, icon, color, order_index, is_active, created_at, updated_at
       FROM statuses 
       WHERE id = $1 AND is_active = true
     `;
     
-    const result = await pool.query(query, [id]);
+    const result = await query(sql, [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -97,7 +92,7 @@ exports.createStatus = async (req, res) => {
     
     // Check if value already exists
     const existingQuery = 'SELECT id FROM statuses WHERE value = $1';
-    const existingResult = await pool.query(existingQuery, [value]);
+    const existingResult = await query(existingQuery, [value]);
     
     if (existingResult.rows.length > 0) {
       return res.status(409).json({
@@ -111,16 +106,16 @@ exports.createStatus = async (req, res) => {
     
     // Get the next order index
     const orderQuery = 'SELECT COALESCE(MAX(order_index), 0) + 1 as next_order FROM statuses';
-    const orderResult = await pool.query(orderQuery);
+    const orderResult = await query(orderQuery);
     const nextOrder = orderResult.rows[0].next_order;
     
-    const query = `
+    const sql = `
       INSERT INTO statuses (value, label, icon, color, order_index)
       VALUES ($1, $2, $3, $4, $5)
       RETURNING id, value, label, icon, color, order_index, is_active, created_at, updated_at
     `;
     
-    const result = await pool.query(query, [value, label, icon, color, nextOrder]);
+    const result = await query(sql, [value, label, icon, color, nextOrder]);
     
     logger.info(`Status created: ${value} by user ${req.user.id}`);
     
@@ -150,7 +145,7 @@ exports.updateStatus = async (req, res) => {
     
     // Check if status exists
     const existingQuery = 'SELECT id FROM statuses WHERE id = $1 AND is_active = true';
-    const existingResult = await pool.query(existingQuery, [id]);
+    const existingResult = await query(existingQuery, [id]);
     
     if (existingResult.rows.length === 0) {
       return res.status(404).json({
@@ -165,7 +160,7 @@ exports.updateStatus = async (req, res) => {
     // Check for duplicate value if value is being updated
     if (value) {
       const duplicateQuery = 'SELECT id FROM statuses WHERE value = $1 AND id != $2';
-      const duplicateResult = await pool.query(duplicateQuery, [value, id]);
+      const duplicateResult = await query(duplicateQuery, [value, id]);
       
       if (duplicateResult.rows.length > 0) {
         return res.status(409).json({
@@ -216,14 +211,14 @@ exports.updateStatus = async (req, res) => {
     
     updateValues.push(id);
     
-    const query = `
+    const sql = `
       UPDATE statuses 
       SET ${updateFields.join(', ')}
       WHERE id = $${paramIndex}
       RETURNING id, value, label, icon, color, order_index, is_active, created_at, updated_at
     `;
     
-    const result = await pool.query(query, updateValues);
+    const result = await query(sql, updateValues);
     
     logger.info(`Status updated: ${id} by user ${req.user.id}`);
     
@@ -252,7 +247,7 @@ exports.deleteStatus = async (req, res) => {
     
     // Check if status exists
     const existingQuery = 'SELECT id, value FROM statuses WHERE id = $1 AND is_active = true';
-    const existingResult = await pool.query(existingQuery, [id]);
+    const existingResult = await query(existingQuery, [id]);
     
     if (existingResult.rows.length === 0) {
       return res.status(404).json({
@@ -266,7 +261,7 @@ exports.deleteStatus = async (req, res) => {
     
     // Check if status is being used by any courses
     const usageQuery = 'SELECT COUNT(*) as count FROM courses WHERE status = $1';
-    const usageResult = await pool.query(usageQuery, [existingResult.rows[0].value]);
+    const usageResult = await query(usageQuery, [existingResult.rows[0].value]);
     
     if (parseInt(usageResult.rows[0].count) > 0) {
       return res.status(409).json({
@@ -279,8 +274,8 @@ exports.deleteStatus = async (req, res) => {
     }
     
     // Soft delete (set is_active to false)
-    const query = 'UPDATE statuses SET is_active = false WHERE id = $1';
-    await pool.query(query, [id]);
+    const sql = 'UPDATE statuses SET is_active = false WHERE id = $1';
+    await query(sql, [id]);
     
     logger.info(`Status deleted: ${id} by user ${req.user.id}`);
     

@@ -362,17 +362,18 @@ export default function CourseDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
+                {/* Display description prominently at the top */}
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                  <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Description</h4>
+                  <p className="text-gray-700 dark:text-gray-300 text-base leading-relaxed">
+                    {course.description || <span className="text-gray-500 dark:text-gray-400 italic">No description provided</span>}
+                  </p>
+                </div>
+                
                 {course.course_code && (
                   <div>
                     <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Course Code</h4>
                     <p className="text-gray-700 dark:text-gray-300 font-mono">{course.course_code}</p>
-                  </div>
-                )}
-                
-                {course.description && (
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Description</h4>
-                    <p className="text-gray-700 dark:text-gray-300">{course.description}</p>
                   </div>
                 )}
                 

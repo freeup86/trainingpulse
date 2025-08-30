@@ -4,8 +4,22 @@ const { asyncHandler, ValidationError, NotFoundError, AuthorizationError } = req
 const logger = require('../utils/logger');
 
 // Validation schemas
+const createModalitySchema = Joi.object({
+  value: Joi.string().min(1).max(50).required(),
+  name: Joi.string().min(1).max(100).required(),
+  description: Joi.string().max(255).allow('').optional(),
+  sort_order: Joi.number().integer().min(0).default(0)
+});
+
+const updateModalitySchema = Joi.object({
+  name: Joi.string().min(1).max(100).optional(),
+  description: Joi.string().max(255).allow('').optional(),
+  sort_order: Joi.number().integer().min(0).optional(),
+  is_active: Joi.boolean().optional()
+});
+
 const createModalityTaskSchema = Joi.object({
-  modality: Joi.string().valid('WBT', 'ILT/VLT', 'Micro Learning', 'SIMS', 'DAP').required(),
+  modality: Joi.string().required(), // Now accepts any modality value from DB
   task_type: Joi.string().min(1).max(50).required(),
   order_index: Joi.number().integer().min(1).required(),
   weight_percentage: Joi.number().integer().min(0).max(100).default(100)
@@ -19,27 +33,233 @@ const updateModalityTaskSchema = Joi.object({
 
 class ModalityController {
   /**
+   * GET /modalities - Get all modalities
+   */
+  getAllModalities = asyncHandler(async (req, res) => {
+    const result = await query(`
+      SELECT 
+        id,
+        value,
+        name,
+        description,
+        is_active,
+        sort_order,
+        created_at,
+        updated_at
+      FROM modalities
+      WHERE is_active = true
+      ORDER BY sort_order, name
+    `);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+  });
+
+  /**
+   * GET /modalities/:id - Get modality by ID
+   */
+  getModalityById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    
+    const result = await query(`
+      SELECT 
+        id,
+        value,
+        name,
+        description,
+        is_active,
+        sort_order,
+        created_at,
+        updated_at
+      FROM modalities
+      WHERE id = $1 AND is_active = true
+    `, [id]);
+    
+    if (result.rows.length === 0) {
+      throw new NotFoundError('Modality not found');
+    }
+    
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  });
+
+  /**
+   * POST /modalities - Create a new modality
+   */
+  createModality = asyncHandler(async (req, res) => {
+    // Validate input
+    const { error, value } = createModalitySchema.validate(req.body);
+    if (error) {
+      throw new ValidationError('Invalid modality data', error.details);
+    }
+
+    const { value: modalityValue, name, description, sort_order } = value;
+
+    // Check if value already exists
+    const existingModality = await query(
+      'SELECT id FROM modalities WHERE value = $1',
+      [modalityValue]
+    );
+    
+    if (existingModality.rows.length > 0) {
+      throw new ValidationError('Modality with this value already exists');
+    }
+    
+    // Create new modality
+    const result = await query(`
+      INSERT INTO modalities (value, name, description, sort_order)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *
+    `, [modalityValue, name, description, sort_order]);
+    
+    logger.info('Modality created successfully', {
+      modalityId: result.rows[0].id,
+      value: modalityValue,
+      createdBy: req.user.id
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result.rows[0]
+    });
+  });
+
+  /**
+   * PUT /modalities/:id - Update a modality
+   */
+  updateModality = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    
+    // Validate input
+    const { error, value } = updateModalitySchema.validate(req.body);
+    if (error) {
+      throw new ValidationError('Invalid update data', error.details);
+    }
+    
+    // Check if modality exists
+    const existingModality = await query(
+      'SELECT * FROM modalities WHERE id = $1',
+      [id]
+    );
+    
+    if (existingModality.rows.length === 0) {
+      throw new NotFoundError('Modality not found');
+    }
+    
+    // Build update query dynamically
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+    
+    Object.keys(value).forEach(key => {
+      if (value[key] !== undefined) {
+        updates.push(`${key} = $${paramIndex}`);
+        values.push(value[key]);
+        paramIndex++;
+      }
+    });
+    
+    if (updates.length === 0) {
+      throw new ValidationError('No valid fields to update');
+    }
+    
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(id);
+    
+    const result = await query(`
+      UPDATE modalities
+      SET ${updates.join(', ')}
+      WHERE id = $${values.length}
+      RETURNING *
+    `, values);
+    
+    logger.info('Modality updated successfully', {
+      modalityId: id,
+      updates: value,
+      updatedBy: req.user.id
+    });
+    
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  });
+
+  /**
+   * DELETE /modalities/:id - Delete a modality
+   */
+  deleteModality = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    
+    // Check if modality is in use
+    const modality = await query(
+      'SELECT value FROM modalities WHERE id = $1',
+      [id]
+    );
+    
+    if (modality.rows.length === 0) {
+      throw new NotFoundError('Modality not found');
+    }
+    
+    const modalityValue = modality.rows[0].value;
+    
+    // Check if used by courses
+    const usageCheck = await query(
+      'SELECT COUNT(*) as count FROM courses WHERE modality = $1',
+      [modalityValue]
+    );
+    
+    if (parseInt(usageCheck.rows[0].count) > 0) {
+      throw new ValidationError('Cannot delete modality that is in use by courses');
+    }
+    
+    // Soft delete
+    await query(
+      'UPDATE modalities SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [id]
+    );
+    
+    logger.info('Modality deleted successfully', {
+      modalityId: id,
+      deletedBy: req.user.id
+    });
+    
+    res.json({
+      success: true,
+      message: 'Modality deleted successfully'
+    });
+  });
+
+  /**
    * GET /modality-tasks - Get all modality tasks grouped by modality
    */
   getAllModalityTasks = asyncHandler(async (req, res) => {
     const result = await query(`
       SELECT 
-        id,
-        modality,
-        task_type,
-        order_index,
-        weight_percentage,
-        created_at
-      FROM modality_tasks
-      ORDER BY modality, order_index
+        mt.id,
+        mt.task_type,
+        mt.order_index,
+        mt.weight_percentage,
+        mt.created_at,
+        m.value as modality,
+        m.name as modality_name
+      FROM modality_tasks mt
+      JOIN modalities m ON mt.modality_id = m.id
+      ORDER BY m.value, mt.order_index
     `);
 
-    // Group by modality
+    // Group by modality value
     const groupedTasks = result.rows.reduce((acc, task) => {
-      if (!acc[task.modality]) {
-        acc[task.modality] = [];
+      const modalityKey = task.modality;
+      
+      if (!acc[modalityKey]) {
+        acc[modalityKey] = [];
       }
-      acc[task.modality].push(task);
+      acc[modalityKey].push(task);
       return acc;
     }, {});
 
@@ -57,15 +277,17 @@ class ModalityController {
 
     const result = await query(`
       SELECT 
-        id,
-        modality,
-        task_type,
-        order_index,
-        weight_percentage,
-        created_at
-      FROM modality_tasks
-      WHERE modality = $1
-      ORDER BY order_index
+        mt.id,
+        mt.task_type,
+        mt.order_index,
+        mt.weight_percentage,
+        mt.created_at,
+        m.value as modality,
+        m.name as modality_name
+      FROM modality_tasks mt
+      JOIN modalities m ON mt.modality_id = m.id
+      WHERE m.value = $1
+      ORDER BY mt.order_index
     `, [modality]);
 
     res.json({
@@ -87,11 +309,22 @@ class ModalityController {
     const { modality, task_type, order_index, weight_percentage } = value;
 
     try {
+      // Get modality_id from modalities table
+      const modalityResult = await query(`
+        SELECT id FROM modalities WHERE value = $1
+      `, [modality]);
+
+      if (modalityResult.rows.length === 0) {
+        throw new ValidationError('Invalid modality');
+      }
+
+      const modality_id = modalityResult.rows[0].id;
+
       // Check if task already exists for this modality
       const existingTask = await query(`
         SELECT id FROM modality_tasks 
-        WHERE modality = $1 AND task_type = $2
-      `, [modality, task_type]);
+        WHERE modality_id = $1 AND task_type = $2
+      `, [modality_id, task_type]);
 
       if (existingTask.rows.length > 0) {
         throw new ValidationError('Task type already exists for this modality');
@@ -100,19 +333,19 @@ class ModalityController {
       // Check if order_index is already used for this modality
       const existingOrder = await query(`
         SELECT id FROM modality_tasks 
-        WHERE modality = $1 AND order_index = $2
-      `, [modality, order_index]);
+        WHERE modality_id = $1 AND order_index = $2
+      `, [modality_id, order_index]);
 
       if (existingOrder.rows.length > 0) {
         throw new ValidationError('Order index already exists for this modality');
       }
 
-      // Create the modality task
+      // Create the modality task with foreign key
       const result = await query(`
-        INSERT INTO modality_tasks (modality, task_type, order_index, weight_percentage, created_at)
-        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+        INSERT INTO modality_tasks (modality_id, modality, task_type, order_index, weight_percentage, created_at)
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
         RETURNING *
-      `, [modality, task_type, order_index, weight_percentage]);
+      `, [modality_id, modality, task_type, order_index, weight_percentage]);
 
       const newTask = result.rows[0];
 
@@ -178,8 +411,8 @@ class ModalityController {
     if (value.task_type) {
       const conflictCheck = await query(`
         SELECT id FROM modality_tasks 
-        WHERE modality = $1 AND task_type = $2 AND id != $3
-      `, [currentTask.modality, value.task_type, id]);
+        WHERE modality_id = $1 AND task_type = $2 AND id != $3
+      `, [currentTask.modality_id, value.task_type, id]);
 
       if (conflictCheck.rows.length > 0) {
         throw new ValidationError('Task type already exists for this modality');
@@ -189,8 +422,8 @@ class ModalityController {
     if (value.order_index) {
       const orderConflictCheck = await query(`
         SELECT id FROM modality_tasks 
-        WHERE modality = $1 AND order_index = $2 AND id != $3
-      `, [currentTask.modality, value.order_index, id]);
+        WHERE modality_id = $1 AND order_index = $2 AND id != $3
+      `, [currentTask.modality_id, value.order_index, id]);
 
       if (orderConflictCheck.rows.length > 0) {
         throw new ValidationError('Order index already exists for this modality');

@@ -3,38 +3,53 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { ArrowLeft, Save, Calendar, Clock, AlertTriangle, Trash2, Package, CheckCircle } from 'lucide-react';
-import { courses, users, teams, programs, folders, lists } from '../lib/api';
+import { courses, users, teams, programs, folders, lists, priorities, modalities } from '../lib/api';
 import { CourseCreateBreadcrumb } from './navigation/Breadcrumb';
 
+// Temporary fallback for modalities (will be replaced by API data)
 const MODALITIES = [
-  { value: 'WBT', label: 'WBT (Web-Based Training)' },
-  { value: 'ILT/VLT', label: 'ILT/VLT (Instructor-Led/Virtual-Led Training)' },
-  { value: 'Micro Learning', label: 'Micro Learning' },
-  { value: 'SIMS', label: 'SIMS (Simulations)' },
-  { value: 'DAP', label: 'DAP (Digital Adoption Platform)' }
-];
-
-
-const PRIORITIES = [
-  { value: 'low', label: 'Low', color: 'text-gray-600' },
-  { value: 'medium', label: 'Medium', color: 'text-blue-600' },
-  { value: 'high', label: 'High', color: 'text-orange-600' },
-  { value: 'critical', label: 'Critical', color: 'text-red-600' }
+  { value: 'WBT', label: 'WBT' },
+  { value: 'ILT_VLT', label: 'ILT/VLT' },
+  { value: 'Micro_Learning', label: 'Micro Learning' },
+  { value: 'SIMS', label: 'SIMS' },
+  { value: 'DAP', label: 'DAP' }
 ];
 
 // Helper function to filter deliverables by modality when API data isn't available
 function getDeliverablesForModality(modality, allDeliverables) {
   if (!modality || !allDeliverables) return [];
   
+  // Map database values to deliverable names
   const modalityDeliverableMap = {
     'WBT': ['Custom Content', 'Course Wrapper'],
-    'ILT/VLT': ['Facilitator Guide', 'Delivery Deck', 'Participation Guide'],
-    'Micro Learning': ['Microlearning'],
+    'ILT_VLT': ['Facilitator Guide', 'Delivery Deck', 'Participation Guide'],
+    'ILT/VLT': ['Facilitator Guide', 'Delivery Deck', 'Participation Guide'], // Support both formats
+    'Micro_Learning': ['Microlearning'],
+    'Micro Learning': ['Microlearning'], // Support both formats
     'SIMS': ['SIMS', 'QRG', 'Demo'],
     'DAP': ['WalkMe']
   };
   
-  const allowedNames = modalityDeliverableMap[modality] || [];
+  // Check for exact match first, then try normalized versions
+  let allowedNames = modalityDeliverableMap[modality];
+  
+  if (!allowedNames) {
+    // Try replacing underscores with spaces or vice versa
+    const normalizedModality = modality.replace(/_/g, ' ');
+    allowedNames = modalityDeliverableMap[normalizedModality];
+  }
+  
+  if (!allowedNames) {
+    // Try the opposite normalization
+    const normalizedModality = modality.replace(/ /g, '_');
+    allowedNames = modalityDeliverableMap[normalizedModality];
+  }
+  
+  if (!allowedNames) {
+    console.warn(`No deliverables mapping found for modality: ${modality}`);
+    return [];
+  }
+  
   return allDeliverables.filter(d => allowedNames.includes(d.name));
 }
 
@@ -92,16 +107,22 @@ export default function CourseForm({ courseId = null, defaultListId = null, hier
   });
 
   // Fetch modality information when modality changes
-  const { data: modalityData } = useQuery({
+  const { data: modalityData, error: modalityError } = useQuery({
     queryKey: ['modality-info', formData.modality],
     queryFn: async () => {
-      const response = await courses.getModalityInfo(formData.modality);
-      return response.data.data;
+      try {
+        const response = await courses.getModalityInfo(formData.modality);
+        return response.data.data;
+      } catch (error) {
+        console.log(`Modality info not available for ${formData.modality}, using fallback`);
+        return null; // Return null to trigger fallback
+      }
     },
     enabled: Boolean(formData.modality),
     onSuccess: (data) => {
       setModalityInfo(data);
-    }
+    },
+    retry: false // Don't retry on failure
   });
 
 
@@ -112,6 +133,24 @@ export default function CourseForm({ courseId = null, defaultListId = null, hier
       const response = await users.getAll();
       // Handle different possible response structures
       return response.data?.data?.users || response.data?.users || response.data?.data || response.data || [];
+    }
+  });
+
+  // Fetch priorities from the API
+  const { data: prioritiesData } = useQuery({
+    queryKey: ['priorities'],
+    queryFn: async () => {
+      const response = await priorities.getAll();
+      return response.data?.data || response.data || [];
+    }
+  });
+
+  // Fetch modalities from the API
+  const { data: modalitiesData } = useQuery({
+    queryKey: ['modalities'],
+    queryFn: async () => {
+      const response = await modalities.getAll();
+      return response.data?.data || response.data || [];
     }
   });
 
@@ -491,7 +530,21 @@ export default function CourseForm({ courseId = null, defaultListId = null, hier
 
   // Get deliverable options for the selected modality (memoized to prevent infinite loops)
   const availableDeliverables = useMemo(() => {
-    return modalityData?.deliverables || getDeliverablesForModality(formData.modality, deliverablesData);
+    const fromApi = modalityData?.deliverables;
+    const fromFallback = getDeliverablesForModality(formData.modality, deliverablesData);
+    
+    // Use API data if available and not empty, otherwise use fallback
+    const result = (fromApi && fromApi.length > 0) ? fromApi : fromFallback;
+    
+    // Debug logging
+    if (formData.modality) {
+      console.log('Modality:', formData.modality);
+      console.log('Deliverables from API:', fromApi);
+      console.log('Deliverables from fallback:', fromFallback);
+      console.log('Using:', result);
+    }
+    
+    return result;
   }, [modalityData?.deliverables, formData.modality, deliverablesData]);
 
   // Auto-select all deliverables by default but allow user to uncheck (except for WBT)
@@ -596,11 +649,21 @@ export default function CourseForm({ courseId = null, defaultListId = null, hier
                   onChange={(e) => handleInputChange('priority', e.target.value)}
                   className="mt-1 block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                 >
-                  {PRIORITIES.map(priority => (
-                    <option key={priority.value} value={priority.value}>
-                      {priority.label}
-                    </option>
-                  ))}
+                  {prioritiesData && prioritiesData.length > 0 ? (
+                    prioritiesData.map(priority => (
+                      <option key={priority.id} value={priority.value}>
+                        {priority.label}
+                      </option>
+                    ))
+                  ) : (
+                    // Fallback to basic priorities if API is not available
+                    <>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -709,9 +772,9 @@ export default function CourseForm({ courseId = null, defaultListId = null, hier
                   disabled={isEditing}
                 >
                   <option value="">Select a modality...</option>
-                  {MODALITIES.map(modality => (
+                  {(modalitiesData || MODALITIES).map(modality => (
                     <option key={modality.value} value={modality.value}>
-                      {modality.label}
+                      {modality.name || modality.label}
                     </option>
                   ))}
                 </select>

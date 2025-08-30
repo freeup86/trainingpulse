@@ -10,9 +10,12 @@ import {
   LogOut,
   ChevronDown,
   PanelLeftClose,
-  PanelLeft 
+  PanelLeft,
+  Sun,
+  Moon 
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth.jsx';
+import { useTheme } from '../../contexts/ThemeContext';
 import { notifications } from '../../lib/api';
 import { Button } from '../ui/Button';
 import { Badge } from '../ui/Badge';
@@ -20,11 +23,17 @@ import { getRoleColor, formatRelativeTime } from '../../lib/utils';
 
 export function Header({ onMenuClick, user }) {
   const { logout } = useAuth();
+  const { theme, isDark, changeTheme } = useTheme();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  const toggleTheme = () => {
+    // Toggle between light and dark (skip system option for simplicity)
+    changeTheme(isDark ? 'light' : 'dark');
+  };
 
   // Fetch recent notifications for the header dropdown
   const { data: notificationsData } = useQuery({
@@ -123,6 +132,21 @@ export function Header({ onMenuClick, user }) {
 
         {/* Right side */}
         <div className="flex items-center space-x-4">
+          {/* Theme Toggle */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            className="relative"
+            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {isDark ? (
+              <Sun className="h-5 w-5 text-yellow-500" />
+            ) : (
+              <Moon className="h-5 w-5 text-gray-700 dark:text-gray-300" />
+            )}
+          </Button>
+
           {/* Notifications */}
           <div className="relative">
             <Button

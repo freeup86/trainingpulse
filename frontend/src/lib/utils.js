@@ -78,26 +78,20 @@ export const getPriorityColor = (priority, variant = 'default') => {
   // Normalize priority to lowercase for comparison
   const normalizedPriority = (priority || 'low').toLowerCase();
   
-  if (variant === 'badge') {
-    const colors = {
-      'low': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
-      'normal': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-      'medium': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
-      'high': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
-      'urgent': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-      'critical': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
-    };
-    return colors[normalizedPriority] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
-  }
-  
   const colors = {
     'low': 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
     'normal': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-    'medium': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
     'high': 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
     'urgent': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    // Legacy support for old data
+    'medium': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
     'critical': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
   };
+  
+  if (variant === 'badge') {
+    return colors[normalizedPriority] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
+  }
+  
   return colors[normalizedPriority] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
 };
 

@@ -51,10 +51,16 @@ export function ThemeProvider({ children }) {
     localStorage.setItem('theme', newTheme);
   };
 
+  const toggleTheme = () => {
+    const newTheme = isDark ? 'light' : 'dark';
+    changeTheme(newTheme);
+  };
+
   const value = {
     theme,
     isDark,
     changeTheme,
+    toggleTheme,
     themes: [
       { id: 'light', name: 'Light' },
       { id: 'dark', name: 'Dark' },
