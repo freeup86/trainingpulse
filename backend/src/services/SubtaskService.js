@@ -117,6 +117,14 @@ class SubtaskService {
 
       const currentSubtask = currentResult.rows[0];
       const courseId = currentSubtask.course_id;
+      
+      // Debug logging for final_signoff_sent columns
+      console.log('DEBUG: Current subtask final_signoff_sent columns:', {
+        final_signoff_sent_start_date: currentSubtask.final_signoff_sent_start_date,
+        final_signoff_sent_end_date: currentSubtask.final_signoff_sent_end_date,
+        final_signoff_sent_date: currentSubtask.final_signoff_sent_date,
+        status: currentSubtask.status
+      });
 
       // Prepare update data
       const allowedFields = ['title', 'status', 'is_blocking', 'weight', 'order_index', 'assigned_user_id', 'assigned_at', 'assigned_by'];
@@ -182,9 +190,19 @@ class SubtaskService {
           updates.start_date = null;
           updates.finish_date = null;
           updates.completed_at = null;
+          updates.final_start_date = null;
+          updates.final_end_date = null;
+          updates.final_revision_entered_date = null;
+          updates.final_revision_end_date = null;
+          updates.final_signoff_entered_date = null;
           changes.start_date = { from: currentSubtask.start_date, to: null };
           changes.finish_date = { from: currentSubtask.finish_date, to: null };
           changes.completed_at = { from: currentSubtask.completed_at, to: null };
+          changes.final_start_date = { from: currentSubtask.final_start_date, to: null };
+          changes.final_end_date = { from: currentSubtask.final_end_date, to: null };
+          changes.final_revision_entered_date = { from: currentSubtask.final_revision_entered_date, to: null };
+          changes.final_revision_end_date = { from: currentSubtask.final_revision_end_date, to: null };
+          changes.final_signoff_entered_date = { from: currentSubtask.final_signoff_entered_date, to: null };
           
           // Clear all phase-specific dates
           const phaseStatusToColumns = {
@@ -248,18 +266,131 @@ class SubtaskService {
             'final_signoff_sent': { start: 'final_signoff_sent_start_date', end: 'final_signoff_sent_end_date', completion: 'final_signoff_sent_date' },
             'final_signoff_received': { start: 'final_signoff_received_start_date', end: null, completion: 'final_signoff_received_date' }
           };
+          
+          // Note: 'final_signoff' status doesn't have its own columns, it uses the generic final_start_date/final_end_date
 
-          // When moving TO a phase status, set the start date
+          // When moving TO a phase status, set the start date (do this BEFORE backward movement clearing)
           if (phaseStatusToColumns[newStatus]) {
             const columns = phaseStatusToColumns[newStatus];
-            if (!currentSubtask[columns.start]) {
-              updates[columns.start] = new Date();
-              changes[columns.start] = { from: null, to: updates[columns.start] };
-            }
+            // Always set the start date when entering a phase status
+            updates[columns.start] = new Date();
+            changes[columns.start] = { from: currentSubtask[columns.start], to: updates[columns.start] };
+            
             // Also set the completion date for backwards compatibility
-            if (!currentSubtask[columns.completion]) {
-              updates[columns.completion] = new Date();
-              changes[columns.completion] = { from: null, to: updates[columns.completion] };
+            updates[columns.completion] = new Date();
+            changes[columns.completion] = { from: currentSubtask[columns.completion], to: updates[columns.completion] };
+            
+            // Clear the end date when re-entering a status
+            if (columns.end) {
+              updates[columns.end] = null;
+              changes[columns.end] = { from: currentSubtask[columns.end], to: null };
+            }
+          }
+          
+          // Special handling for Final Start/End dates (for Final Revision and Final Signoff tracking)
+          // This is OUTSIDE the phaseStatusToColumns check so it works for all statuses
+          // Only 'final_signoff' should set the final_signoff_entered_date
+          // 'final_signoff_sent' and 'final_signoff_received' are separate statuses that shouldn't set this date
+          const isAnyFinalSignoff = (newStatus === 'final_signoff' || newStatus === 'final_signoff_sent' || newStatus === 'final_signoff_received');
+          const wasAnyFinalSignoff = (oldStatus === 'final_signoff' || oldStatus === 'final_signoff_sent' || oldStatus === 'final_signoff_received');
+          
+          console.log('DEBUG: Final date check', {
+            newStatus,
+            oldStatus,
+            isAnyFinalSignoff,
+            wasAnyFinalSignoff,
+            isFinalRevision: newStatus === 'final_revision',
+            currentRevisionDate: currentSubtask.final_revision_entered_date,
+            currentSignoffDate: currentSubtask.final_signoff_entered_date,
+            currentFinalStartDate: currentSubtask.final_start_date,
+            currentFinalEndDate: currentSubtask.final_end_date
+          });
+          
+          // Handle Final Revision and Final Signoff dates
+          if (newStatus === 'final_revision') {
+            // Entering Final Revision - always update the revision entered date
+            updates.final_revision_entered_date = new Date();
+            changes.final_revision_entered_date = { from: currentSubtask.final_revision_entered_date, to: updates.final_revision_entered_date };
+            
+            // Clear revision end date when re-entering revision
+            updates.final_revision_end_date = null;
+            changes.final_revision_end_date = { from: currentSubtask.final_revision_end_date, to: null };
+            
+            // Clear only final_signoff_sent dates when entering final_revision
+            updates.final_signoff_sent_start_date = null;
+            updates.final_signoff_sent_end_date = null;
+            updates.final_signoff_sent_date = null;
+            changes.final_signoff_sent_start_date = { from: currentSubtask.final_signoff_sent_start_date, to: null };
+            changes.final_signoff_sent_end_date = { from: currentSubtask.final_signoff_sent_end_date, to: null };
+            changes.final_signoff_sent_date = { from: currentSubtask.final_signoff_sent_date, to: null };
+            
+            // If coming forward from final_signoff, set end date for signoff and preserve signoff dates
+            if (oldStatus === 'final_signoff') {
+              // Moving forward from final_signoff to revision - set signoff end date
+              updates.final_end_date = new Date();
+              changes.final_end_date = { from: currentSubtask.final_end_date, to: updates.final_end_date };
+              console.log('DEBUG: Setting final_end_date (signoff end) when moving forward from final_signoff to revision');
+              // Keep final_signoff_entered_date intact - don't clear it
+            }
+            
+            console.log('DEBUG: Set final_revision_entered_date for final_revision');
+          } else if (newStatus === 'final_signoff') {
+            // Only 'final_signoff' sets the signoff entered date
+            // Not 'final_signoff_sent' or 'final_signoff_received'
+            updates.final_signoff_entered_date = new Date();
+            changes.final_signoff_entered_date = { from: currentSubtask.final_signoff_entered_date, to: updates.final_signoff_entered_date };
+            
+            // Clear signoff end date when re-entering signoff
+            updates.final_end_date = null;
+            changes.final_end_date = { from: currentSubtask.final_end_date, to: null };
+            
+            // Note: Moving from final_revision to final_signoff is backward movement
+            // The backward movement logic will handle clearing revision dates
+            
+            console.log('DEBUG: Setting final_signoff_entered_date for final_signoff status');
+          } else if (isAnyFinalSignoff) {
+            // For final_signoff_sent and final_signoff_received, don't set the signoff entered date
+            console.log('DEBUG: Not setting final_signoff_entered_date for status:', newStatus);
+            
+            // When moving from revision to signoff, only set revision end date
+            // Don't clear final_end_date as it tracks when signoff period ended previously
+            if (oldStatus === 'final_revision') {
+              // Moving from revision to signoff - set revision end date
+              // Keep final_end_date intact as it represents when signoff previously ended
+              
+              // Set revision end date
+              if (currentSubtask.final_revision_entered_date) {
+                updates.final_revision_end_date = new Date();
+                changes.final_revision_end_date = { from: currentSubtask.final_revision_end_date, to: updates.final_revision_end_date };
+                console.log('DEBUG: Setting final_revision_end_date when moving from revision to signoff, preserving final_end_date');
+              }
+            }
+            // When moving between signoff statuses, preserve everything
+            else if (wasAnyFinalSignoff) {
+              console.log('DEBUG: Moving between signoff statuses - preserving all dates');
+              // Don't modify final_end_date or final_signoff_entered_date
+            }
+            
+            console.log('DEBUG: Final signoff status:', newStatus, 'wasAnyFinalSignoff:', wasAnyFinalSignoff);
+          }
+          
+          // Clear final dates if moving to a status before final_revision
+          const finalPhases = ['final_revision', 'final_signoff', 'final_signoff_sent', 'final_signoff_received'];
+          if (!finalPhases.includes(newStatus)) {
+            if (currentSubtask.final_start_date || currentSubtask.final_end_date || 
+                currentSubtask.final_revision_entered_date || currentSubtask.final_revision_end_date ||
+                currentSubtask.final_signoff_entered_date) {
+              updates.final_start_date = null;
+              updates.final_end_date = null;
+              updates.final_revision_entered_date = null;
+              updates.final_revision_end_date = null;
+              updates.final_signoff_entered_date = null;
+              changes.final_start_date = { from: currentSubtask.final_start_date, to: null };
+              changes.final_end_date = { from: currentSubtask.final_end_date, to: null };
+              changes.final_revision_entered_date = { from: currentSubtask.final_revision_entered_date, to: null };
+              changes.final_revision_end_date = { from: currentSubtask.final_revision_end_date, to: null };
+              changes.final_signoff_entered_date = { from: currentSubtask.final_signoff_entered_date, to: null };
+              console.log('DEBUG: Clearing all final dates when moving before final phases');
             }
           }
 
@@ -273,32 +404,134 @@ class SubtaskService {
           }
 
           // Clear future phase dates when moving backward in the workflow
-          const phaseOrder = ['alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final_revision', 'final_signoff_sent', 'final_signoff_received'];
+          // This MUST happen BEFORE setting dates for the new status
+          const phaseOrder = ['alpha_draft', 'alpha_review', 'beta_revision', 'beta_review', 'final_signoff', 'final_revision', 'final_signoff_sent', 'final_signoff_received'];
           const currentPhaseIndex = phaseOrder.indexOf(newStatus);
           const oldPhaseIndex = phaseOrder.indexOf(oldStatus);
           
           if (currentPhaseIndex >= 0 && currentPhaseIndex < oldPhaseIndex) {
             // Moving backward - clear all future phase dates (start, end, and completion)
+            console.log('DEBUG: Backward movement detected from', oldStatus, '(index', oldPhaseIndex, ') to', newStatus, '(index', currentPhaseIndex, ')');
+            console.log('DEBUG: Will clear dates for phases after', newStatus, ':', phaseOrder.slice(currentPhaseIndex + 1));
+            console.log('DEBUG: Starting to process future phases for clearing');
+            
             for (let i = currentPhaseIndex + 1; i < phaseOrder.length; i++) {
               const futurePhase = phaseOrder[i];
-              const futureColumns = phaseStatusToColumns[futurePhase];
+              console.log('DEBUG: Checking if should clear dates for phase:', futurePhase);
               
-              if (futureColumns) {
-                // Clear start date
-                if (currentSubtask[futureColumns.start]) {
-                  updates[futureColumns.start] = null;
-                  changes[futureColumns.start] = { from: currentSubtask[futureColumns.start], to: null };
+              // Skip clearing if this is a final_signoff_sent/received and we're moving TO final_signoff_sent
+              if (futurePhase === 'final_signoff_sent' && newStatus === 'final_signoff_sent') {
+                console.log('DEBUG: Skipping clear for final_signoff_sent since we are moving TO it');
+                continue;
+              }
+              if (futurePhase === 'final_signoff_received' && newStatus === 'final_signoff_received') {
+                console.log('DEBUG: Skipping clear for final_signoff_received since we are moving TO it');
+                continue;
+              }
+              
+              console.log('DEBUG: Clearing dates for phase:', futurePhase);
+              
+              // Handle special Final phase dates
+              if (futurePhase === 'final_revision') {
+                // Clear Final Revision dates
+                if (currentSubtask.final_revision_entered_date) {
+                  updates.final_revision_entered_date = null;
+                  changes.final_revision_entered_date = { from: currentSubtask.final_revision_entered_date, to: null };
                 }
-                // Clear end date
-                if (currentSubtask[futureColumns.end]) {
-                  updates[futureColumns.end] = null;
-                  changes[futureColumns.end] = { from: currentSubtask[futureColumns.end], to: null };
+                if (currentSubtask.final_revision_end_date) {
+                  updates.final_revision_end_date = null;
+                  changes.final_revision_end_date = { from: currentSubtask.final_revision_end_date, to: null };
                 }
-                // Clear completion date
-                if (currentSubtask[futureColumns.completion]) {
-                  updates[futureColumns.completion] = null;
-                  changes[futureColumns.completion] = { from: currentSubtask[futureColumns.completion], to: null };
+              } else if (futurePhase === 'final_signoff') {
+                // Clear Final Signoff dates
+                if (currentSubtask.final_signoff_entered_date) {
+                  updates.final_signoff_entered_date = null;
+                  changes.final_signoff_entered_date = { from: currentSubtask.final_signoff_entered_date, to: null };
                 }
+                if (currentSubtask.final_end_date) {
+                  updates.final_end_date = null;
+                  changes.final_end_date = { from: currentSubtask.final_end_date, to: null };
+                }
+              } else if (futurePhase === 'final_signoff_sent') {
+                console.log('DEBUG: Clearing final_signoff_sent columns');
+                console.log('DEBUG: Current values:', {
+                  start: currentSubtask.final_signoff_sent_start_date,
+                  end: currentSubtask.final_signoff_sent_end_date,
+                  date: currentSubtask.final_signoff_sent_date
+                });
+                
+                // Always clear these dates when moving backward past final_signoff_sent
+                updates.final_signoff_sent_start_date = null;
+                changes.final_signoff_sent_start_date = { from: currentSubtask.final_signoff_sent_start_date, to: null };
+                console.log('DEBUG: Set updates.final_signoff_sent_start_date = null');
+                
+                updates.final_signoff_sent_end_date = null;
+                changes.final_signoff_sent_end_date = { from: currentSubtask.final_signoff_sent_end_date, to: null };
+                console.log('DEBUG: Set updates.final_signoff_sent_end_date = null');
+                
+                updates.final_signoff_sent_date = null;
+                changes.final_signoff_sent_date = { from: currentSubtask.final_signoff_sent_date, to: null };
+                console.log('DEBUG: Set updates.final_signoff_sent_date = null');
+              } else if (futurePhase === 'final_signoff_received') {
+                console.log('DEBUG: Clearing final_signoff_received columns');
+                // Clear received dates using phaseStatusToColumns
+                const receivedColumns = phaseStatusToColumns['final_signoff_received'];
+                if (receivedColumns) {
+                  if (receivedColumns.start && currentSubtask[receivedColumns.start]) {
+                    updates[receivedColumns.start] = null;
+                    changes[receivedColumns.start] = { from: currentSubtask[receivedColumns.start], to: null };
+                  }
+                  if (receivedColumns.completion && currentSubtask[receivedColumns.completion]) {
+                    updates[receivedColumns.completion] = null;
+                    changes[receivedColumns.completion] = { from: currentSubtask[receivedColumns.completion], to: null };
+                  }
+                }
+              } else {
+                // Handle other phases through phaseStatusToColumns
+                const futureColumns = phaseStatusToColumns[futurePhase];
+                console.log('DEBUG: Processing regular phase:', futurePhase, 'columns:', futureColumns);
+                if (futureColumns) {
+                  // Clear start date
+                  if (futureColumns.start) {
+                    console.log('DEBUG: Clearing', futureColumns.start, 'current value:', currentSubtask[futureColumns.start], 'updates value before:', updates[futureColumns.start]);
+                    updates[futureColumns.start] = null;
+                    changes[futureColumns.start] = { from: currentSubtask[futureColumns.start], to: null };
+                  }
+                  // Clear end date
+                  if (futureColumns.end) {
+                    console.log('DEBUG: Clearing', futureColumns.end, 'current value:', currentSubtask[futureColumns.end], 'updates value before:', updates[futureColumns.end]);
+                    updates[futureColumns.end] = null;
+                    changes[futureColumns.end] = { from: currentSubtask[futureColumns.end], to: null };
+                  }
+                  // Clear completion date
+                  if (futureColumns.completion) {
+                    console.log('DEBUG: Clearing', futureColumns.completion, 'current value:', currentSubtask[futureColumns.completion], 'updates value before:', updates[futureColumns.completion]);
+                    updates[futureColumns.completion] = null;
+                    changes[futureColumns.completion] = { from: currentSubtask[futureColumns.completion], to: null };
+                  }
+                }
+              }
+            }
+            console.log('DEBUG: Completed backward movement clearing from', oldStatus, 'to', newStatus);
+            console.log('DEBUG: All date updates after clearing:', Object.keys(updates).filter(k => k.includes('date')).reduce((obj, k) => ({ ...obj, [k]: updates[k] }), {}));
+            
+            // Now re-set the dates for the status we're moving TO (since backward clearing might have removed them)
+            if (phaseStatusToColumns[newStatus]) {
+              const columns = phaseStatusToColumns[newStatus];
+              console.log('DEBUG: Re-setting dates for target status:', newStatus);
+              
+              // Always set the start date when entering a phase status after backward movement
+              updates[columns.start] = new Date();
+              changes[columns.start] = { from: currentSubtask[columns.start], to: updates[columns.start] };
+              
+              // Also set the completion date for backwards compatibility
+              updates[columns.completion] = new Date();
+              changes[columns.completion] = { from: currentSubtask[columns.completion], to: updates[columns.completion] };
+              
+              // Clear the end date when re-entering a status
+              if (columns.end) {
+                updates[columns.end] = null;
+                changes[columns.end] = { from: currentSubtask[columns.end], to: null };
               }
             }
           }
@@ -823,6 +1056,11 @@ class SubtaskService {
           cs.beta_review_end_date,
           cs.final_revision_end_date,
           cs.final_signoff_sent_end_date,
+          cs.final_start_date,
+          cs.final_end_date,
+          cs.final_revision_entered_date,
+          cs.final_revision_end_date,
+          cs.final_signoff_entered_date,
           cs.created_at,
           cs.updated_at
         FROM course_subtasks cs
@@ -863,6 +1101,11 @@ class SubtaskService {
           beta_review_end_date: subtask.beta_review_end_date,
           final_revision_end_date: subtask.final_revision_end_date,
           final_signoff_sent_end_date: subtask.final_signoff_sent_end_date,
+          final_start_date: subtask.final_start_date,
+          final_end_date: subtask.final_end_date,
+          final_revision_entered_date: subtask.final_revision_entered_date,
+          final_revision_end_date: subtask.final_revision_end_date,
+          final_signoff_entered_date: subtask.final_signoff_entered_date,
           created_at: subtask.created_at,
           updated_at: subtask.updated_at
         };

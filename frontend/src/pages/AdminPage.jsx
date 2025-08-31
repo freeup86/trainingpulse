@@ -65,6 +65,38 @@ const PRIORITY_ICONS = {
   'Circle': Circle
 };
 
+// Helper function to convert text color classes to background color classes
+const textColorToBgColor = (textColor) => {
+  if (!textColor) return 'bg-gray-500';
+  
+  // Map of text colors to their corresponding background colors
+  const colorMap = {
+    'text-gray-500': 'bg-gray-500',
+    'text-blue-500': 'bg-blue-500',
+    'text-green-500': 'bg-green-500',
+    'text-yellow-500': 'bg-yellow-500',
+    'text-orange-500': 'bg-orange-500',
+    'text-red-500': 'bg-red-500',
+    'text-purple-500': 'bg-purple-500',
+    'text-pink-500': 'bg-pink-500',
+    'text-indigo-500': 'bg-indigo-500',
+    'text-teal-500': 'bg-teal-500',
+    'text-gray-400': 'bg-gray-400',
+    'text-blue-400': 'bg-blue-400',
+    'text-green-400': 'bg-green-400',
+    'text-yellow-400': 'bg-yellow-400',
+    'text-orange-400': 'bg-orange-400',
+    'text-red-400': 'bg-red-400',
+    'text-purple-400': 'bg-purple-400',
+    'text-pink-400': 'bg-pink-400',
+    'text-indigo-400': 'bg-indigo-400',
+    'text-teal-400': 'bg-teal-400'
+  };
+  
+  // Return mapped color or fallback to simple replacement
+  return colorMap[textColor] || textColor.replace('text-', 'bg-');
+};
+
 
 export default function AdminPage() {
   const { user } = useAuth();
@@ -1608,42 +1640,52 @@ export default function AdminPage() {
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                           Color *
                         </label>
-                        <input
-                          type="text"
-                          value={phaseStatusFormData.color}
-                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, color: e.target.value }))}
+                        <select
+                          value={`${phaseStatusFormData.color} ${phaseStatusFormData.darkColor || ''}`}
+                          onChange={(e) => {
+                            const [lightColor, darkColor] = e.target.value.split(' ');
+                            setPhaseStatusFormData(prev => ({ 
+                              ...prev, 
+                              color: lightColor,
+                              darkColor: darkColor || lightColor.replace('text-', 'dark:text-')
+                            }));
+                          }}
                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                          placeholder="e.g., text-blue-500"
                           required
-                        />
+                        >
+                          <option value="text-gray-500 dark:text-gray-400">Gray</option>
+                          <option value="text-blue-500 dark:text-blue-400">Blue</option>
+                          <option value="text-green-500 dark:text-green-400">Green</option>
+                          <option value="text-yellow-500 dark:text-yellow-400">Yellow</option>
+                          <option value="text-orange-500 dark:text-orange-400">Orange</option>
+                          <option value="text-red-500 dark:text-red-400">Red</option>
+                          <option value="text-purple-500 dark:text-purple-400">Purple</option>
+                          <option value="text-pink-500 dark:text-pink-400">Pink</option>
+                          <option value="text-indigo-500 dark:text-indigo-400">Indigo</option>
+                          <option value="text-teal-500 dark:text-teal-400">Teal</option>
+                        </select>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                          Dark Color
-                        </label>
-                        <input
-                          type="text"
-                          value={phaseStatusFormData.darkColor}
-                          onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, darkColor: e.target.value }))}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                          placeholder="e.g., dark:text-blue-400"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                           Icon
                         </label>
-                        <input
-                          type="text"
+                        <select
                           value={phaseStatusFormData.icon}
                           onChange={(e) => setPhaseStatusFormData(prev => ({ ...prev, icon: e.target.value }))}
                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                          placeholder="e.g., PlayCircle"
-                        />
+                        >
+                          <option value="PlayCircle">Play Circle</option>
+                          <option value="CheckCircle">Check Circle</option>
+                          <option value="Circle">Circle</option>
+                          <option value="Pause">Pause</option>
+                          <option value="AlertTriangle">Alert Triangle</option>
+                          <option value="Edit">Edit</option>
+                          <option value="X">X</option>
+                        </select>
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                           Sort Order
@@ -1732,7 +1774,7 @@ export default function AdminPage() {
                         .map((phaseStatus) => (
                         <div key={phaseStatus.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
                           <div className="flex items-center space-x-4">
-                            <div className={`h-3 w-3 rounded-full ${phaseStatus.color.replace('text-', 'bg-')}`}></div>
+                            <div className={`h-3 w-3 rounded-full ${textColorToBgColor(phaseStatus.color)}`}></div>
                             <div>
                               <div className="flex items-center space-x-2">
                                 <span className="font-medium text-gray-900 dark:text-white">{phaseStatus.label}</span>
@@ -1756,7 +1798,7 @@ export default function AdminPage() {
                                 </p>
                               )}
                               <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                Order: {phaseStatus.sortOrder} | Icon: {phaseStatus.icon} | Completion: {phaseStatus.completionPercentage || 0}%
+                                Order: {phaseStatus.sortOrder} | Icon: {phaseStatus.icon} | Color: {phaseStatus.color.replace('text-', '').replace('-500', '').replace('-', ' ')} | Completion: {phaseStatus.completionPercentage || 0}%
                               </div>
                             </div>
                           </div>

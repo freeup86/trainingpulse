@@ -14,7 +14,7 @@ import {
   RefreshCw,
   BarChart3
 } from 'lucide-react';
-import { users } from '../lib/api';
+import { users, priorities } from '../lib/api';
 import { formatDate, formatRelativeTime, getStatusColor, getPriorityColor } from '../lib/utils';
 import Breadcrumb from '../components/navigation/Breadcrumb';
 
@@ -23,6 +23,15 @@ function AssignmentsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [expandedUsers, setExpandedUsers] = useState(new Set());
+
+  // Fetch priorities from the API
+  const { data: prioritiesData } = useQuery({
+    queryKey: ['priorities'],
+    queryFn: async () => {
+      const response = await priorities.getAll();
+      return response.data?.data || response.data || [];
+    }
+  });
 
   // Fetch all users
   const { data: usersData, isLoading: usersLoading } = useQuery({
@@ -289,10 +298,11 @@ function AssignmentsPage() {
               className="block w-full border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
             >
               <option value="all">All Priorities</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
+              {(prioritiesData || []).map(priority => (
+                <option key={priority.value} value={priority.value}>
+                  {priority.label || priority.name || priority.value}
+                </option>
+              ))}
             </select>
           </div>
 

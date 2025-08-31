@@ -47,9 +47,10 @@ class StatusAggregator {
   /**
    * Calculate course completion percentage from subtasks
    */
-  async calculateCompletionPercentage(courseId) {
+  async calculateCompletionPercentage(courseId, client = null) {
     try {
-      const result = await query(`
+      const queryFn = client ? client.query.bind(client) : query;
+      const result = await queryFn(`
         SELECT 
           COUNT(*) as total_subtasks,
           SUM(COALESCE(mt.weight_percentage, 100)) as total_weight_percentage,
@@ -290,7 +291,8 @@ class StatusAggregator {
       } = options;
 
       const statusData = await this.calculateCourseStatus(courseId);
-      const { calculatedStatus, completionPercentage } = statusData;
+      const { calculatedStatus } = statusData;
+      let { completionPercentage } = statusData;
 
       // Get current values to check if update is needed
       const currentResult = await query(
@@ -373,6 +375,19 @@ class StatusAggregator {
             
             // Reset all phase statuses and dates for the new course status
             await this.resetPhaseData(client, courseId);
+            
+            // Recalculate completion percentage after reset (should be 0%)
+            const newCompletionData = await this.calculateCompletionPercentage(courseId, client);
+            completionPercentage = newCompletionData.percentage;
+            
+            // Update the params array with the new completion percentage
+            updateParams[1] = completionPercentage;
+            
+            logger.info('Recalculated completion after phase reset', {
+              courseId,
+              newPercentage: completionPercentage,
+              reason: 'Phase data reset for new course status'
+            });
           }
           
           updateQuery += ` WHERE id = $${updateParams.length + 1}`;
@@ -635,6 +650,11 @@ class StatusAggregator {
           final_signoff_sent_date = NULL,
           final_signoff_received_start_date = NULL,
           final_signoff_received_date = NULL,
+          -- Clear the newer tracking columns as well
+          final_signoff_entered_date = NULL,
+          final_revision_entered_date = NULL,
+          final_start_date = NULL,
+          final_end_date = NULL,
           updated_at = CURRENT_TIMESTAMP
         WHERE course_id = $1
       `, [courseId]);

@@ -2841,6 +2841,26 @@ function CoursePhases({ courseId }) {
     }
   });
 
+  // Helper function to get the color class for a specific phase status
+  const getPhaseColor = (phaseValue) => {
+    const phaseStatus = phaseStatusesData?.find(s => s.value === phaseValue);
+    if (phaseStatus) {
+      return `${phaseStatus.color} ${phaseStatus.darkColor || ''}`;
+    }
+    // Fallback colors based on phase
+    const fallbackColors = {
+      'alpha_draft': 'text-orange-600 dark:text-orange-400',
+      'alpha_review': 'text-yellow-600 dark:text-yellow-400',
+      'beta_revision': 'text-purple-600 dark:text-purple-400',
+      'beta_review': 'text-indigo-600 dark:text-indigo-400',
+      'final_revision': 'text-pink-600 dark:text-pink-400',
+      'final_signoff': 'text-purple-600 dark:text-purple-400',
+      'final_signoff_sent': 'text-blue-600 dark:text-blue-400',
+      'final_signoff_received': 'text-teal-600 dark:text-teal-400'
+    };
+    return fallbackColors[phaseValue] || 'text-gray-600 dark:text-gray-400';
+  };
+
   // Close editing when clicking outside or pressing Escape
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -3167,10 +3187,10 @@ function CoursePhases({ courseId }) {
             <div className="w-48">Phase</div>
             <div className="w-28 ml-2">Status</div>
             <div className="w-40 ml-2">Assignees</div>
-            <div className="w-32 ml-4">Alpha Start/End</div>
-            <div className="w-32 ml-4">Beta Start/End</div>
-            <div className="w-32 ml-4">Final Start/End</div>
-            <div className="w-32 ml-4">Signoff Date</div>
+            <div className="ml-4" style={{width: '154px'}}>Alpha Start/End</div>
+            <div className="ml-4" style={{width: '154px'}}>Beta Start/End</div>
+            <div className="ml-4" style={{width: '154px'}}>Final Start/End</div>
+            <div className="ml-4" style={{width: '154px'}}>Signoff Date</div>
           </div>
         </div>
         
@@ -3202,7 +3222,7 @@ function CoursePhases({ courseId }) {
 
           return (
             <div key={task.id || index} className="group bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800">
-              <div className="flex items-center py-1 px-6">
+              <div className="flex items-start py-1 px-6">
                 {/* Phase Icon and Title Column */}
                 <div className="w-48 flex items-center space-x-2">
                   {isUpdating ? (
@@ -3377,95 +3397,107 @@ function CoursePhases({ courseId }) {
                 </div>
                 
                 {/* Alpha Start/End Column */}
-                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
-                  <div className="space-y-1">
-                    {/* Alpha Draft */}
-                    {(task.alpha_draft_start_date || task.alpha_draft_end_date) && (
-                      <div className="text-xs text-blue-600 dark:text-blue-400">
-                        <div className="flex items-center space-x-1">
-                          <Calendar className="h-3 w-3" />
-                          <span>Draft: {task.alpha_draft_start_date ? formatDate(task.alpha_draft_start_date) : '—'}</span>
-                        </div>
-                        {task.alpha_draft_end_date && (
-                          <div className="flex items-center space-x-1">
-                            <CheckCircle className="h-3 w-3" />
-                            <span>End: {formatDate(task.alpha_draft_end_date)}</span>
-                          </div>
-                        )}
+                <div className="ml-4 text-xs text-gray-600 dark:text-gray-400 align-top" style={{width: '154px', verticalAlign: 'top'}}>
+                  {/* Alpha Draft */}
+                  {(task.alpha_draft_start_date || task.alpha_draft_end_date) ? (
+                    <div className={`text-xs ${getPhaseColor('alpha_draft')}`}>
+                      <div className="flex items-center space-x-1">
+                        <Calendar className="h-3 w-3" />
+                        <span>Draft: {task.alpha_draft_start_date ? formatDate(task.alpha_draft_start_date) : '—'}</span>
                       </div>
-                    )}
-                    {/* Alpha Review */}
-                    {(task.alpha_review_start_date || task.alpha_review_end_date) && (
-                      <div className="text-xs text-green-600 dark:text-green-400">
+                      {task.alpha_draft_end_date && (
                         <div className="flex items-center space-x-1">
-                          <Calendar className="h-3 w-3" />
-                          <span>Review: {task.alpha_review_start_date ? formatDate(task.alpha_review_start_date) : '—'}</span>
+                          <CheckCircle className="h-3 w-3" />
+                          <span>End: {formatDate(task.alpha_draft_end_date)}</span>
                         </div>
-                        {task.alpha_review_end_date && (
-                          <div className="flex items-center space-x-1">
-                            <CheckCircle className="h-3 w-3" />
-                            <span>End: {formatDate(task.alpha_review_end_date)}</span>
-                          </div>
-                        )}
+                      )}
+                    </div>
+                  ) : null}
+                  {/* Alpha Review */}
+                  {(task.alpha_review_start_date || task.alpha_review_end_date) ? (
+                    <div className={`text-xs ${getPhaseColor('alpha_review')}`}>
+                      <div className="flex items-center space-x-1">
+                        <Calendar className="h-3 w-3" />
+                        <span>Review: {task.alpha_review_start_date ? formatDate(task.alpha_review_start_date) : '—'}</span>
                       </div>
-                    )}
-                    {/* Show dash if no alpha dates */}
-                    {!task.alpha_draft_start_date && !task.alpha_draft_end_date && !task.alpha_review_start_date && !task.alpha_review_end_date && (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </div>
+                      {task.alpha_review_end_date && (
+                        <div className="flex items-center space-x-1">
+                          <CheckCircle className="h-3 w-3" />
+                          <span>End: {formatDate(task.alpha_review_end_date)}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  {/* Show dash if no alpha dates */}
+                  {!task.alpha_draft_start_date && !task.alpha_draft_end_date && !task.alpha_review_start_date && !task.alpha_review_end_date && (
+                    <span className="text-gray-400">—</span>
+                  )}
                 </div>
                 
                 {/* Beta Start/End Column */}
-                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
-                  <div className="space-y-1">
-                    {/* Beta Revision */}
-                    {(task.beta_revision_start_date || task.beta_revision_end_date) && (
-                      <div className="text-xs text-orange-600 dark:text-orange-400">
-                        <div className="flex items-center space-x-1">
-                          <Calendar className="h-3 w-3" />
-                          <span>Revision: {task.beta_revision_start_date ? formatDate(task.beta_revision_start_date) : '—'}</span>
-                        </div>
-                        {task.beta_revision_end_date && (
-                          <div className="flex items-center space-x-1">
-                            <CheckCircle className="h-3 w-3" />
-                            <span>End: {formatDate(task.beta_revision_end_date)}</span>
-                          </div>
-                        )}
+                <div className="ml-4 text-xs text-gray-600 dark:text-gray-400 align-top" style={{width: '154px', verticalAlign: 'top'}}>
+                  {/* Beta Revision */}
+                  {(task.beta_revision_start_date || task.beta_revision_end_date) ? (
+                    <div className={`text-xs ${getPhaseColor('beta_revision')}`}>
+                      <div className="flex items-center space-x-1">
+                        <Calendar className="h-3 w-3" />
+                        <span>Revision: {task.beta_revision_start_date ? formatDate(task.beta_revision_start_date) : '—'}</span>
                       </div>
-                    )}
-                    {/* Beta Review */}
-                    {(task.beta_review_start_date || task.beta_review_end_date) && (
-                      <div className="text-xs text-purple-600 dark:text-purple-400">
+                      {task.beta_revision_end_date && (
                         <div className="flex items-center space-x-1">
-                          <Calendar className="h-3 w-3" />
-                          <span>Review: {task.beta_review_start_date ? formatDate(task.beta_review_start_date) : '—'}</span>
+                          <CheckCircle className="h-3 w-3" />
+                          <span>End: {formatDate(task.beta_revision_end_date)}</span>
                         </div>
-                        {task.beta_review_end_date && (
-                          <div className="flex items-center space-x-1">
-                            <CheckCircle className="h-3 w-3" />
-                            <span>End: {formatDate(task.beta_review_end_date)}</span>
-                          </div>
-                        )}
+                      )}
+                    </div>
+                  ) : null}
+                  {/* Beta Review */}
+                  {(task.beta_review_start_date || task.beta_review_end_date) ? (
+                    <div className={`text-xs ${getPhaseColor('beta_review')}`}>
+                      <div className="flex items-center space-x-1">
+                        <Calendar className="h-3 w-3" />
+                        <span>Review: {task.beta_review_start_date ? formatDate(task.beta_review_start_date) : '—'}</span>
                       </div>
-                    )}
-                    {/* Show dash if no beta dates */}
-                    {!task.beta_revision_start_date && !task.beta_revision_end_date && !task.beta_review_start_date && !task.beta_review_end_date && (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </div>
+                      {task.beta_review_end_date && (
+                        <div className="flex items-center space-x-1">
+                          <CheckCircle className="h-3 w-3" />
+                          <span>End: {formatDate(task.beta_review_end_date)}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  {/* Show dash if no beta dates */}
+                  {!task.beta_revision_start_date && !task.beta_revision_end_date && !task.beta_review_start_date && !task.beta_review_end_date && (
+                    <span className="text-gray-400">—</span>
+                  )}
                 </div>
                 
                 {/* Final Start/End Column */}
-                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
-                  <div className="space-y-1">
-                    {/* Final Revision */}
-                    {(task.final_revision_start_date || task.final_revision_end_date) && (
-                      <div className="text-xs text-yellow-600 dark:text-yellow-400">
+                <div className="ml-4 text-xs text-gray-600 dark:text-gray-400 align-top" style={{width: '154px', verticalAlign: 'top'}}>
+                    {/* Show Signoff date first if it exists, with end date directly below it */}
+                    {task.final_signoff_entered_date && (
+                      <div className={`text-xs ${getPhaseColor('final_signoff')}`}>
                         <div className="flex items-center space-x-1">
                           <Calendar className="h-3 w-3" />
-                          <span>Final: {task.final_revision_start_date ? formatDate(task.final_revision_start_date) : '—'}</span>
+                          <span>Signoff: {formatDate(task.final_signoff_entered_date)}</span>
                         </div>
+                        {/* Show end date directly under Signoff in same color */}
+                        {task.final_end_date && (
+                          <div className="flex items-center space-x-1">
+                            <CheckCircle className="h-3 w-3" />
+                            <span>End: {formatDate(task.final_end_date)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* Show Revision date below Signoff section if it exists */}
+                    {task.final_revision_entered_date && (
+                      <div className={`text-xs ${getPhaseColor('final_revision')}`}>
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>Revision: {formatDate(task.final_revision_entered_date)}</span>
+                        </div>
+                        {/* Show revision end date if it exists */}
                         {task.final_revision_end_date && (
                           <div className="flex items-center space-x-1">
                             <CheckCircle className="h-3 w-3" />
@@ -3474,19 +3506,28 @@ function CoursePhases({ courseId }) {
                         )}
                       </div>
                     )}
+                    {/* Fallback to final_start_date if new columns don't exist yet */}
+                    {!task.final_revision_entered_date && !task.final_signoff_entered_date && task.final_start_date && (
+                      <div className={`text-xs ${task.status === 'final_revision' ? getPhaseColor('final_revision') : getPhaseColor('final_signoff')}`}>
+                        <div className="flex items-center space-x-1">
+                          <Calendar className="h-3 w-3" />
+                          <span>
+                            {task.status === 'final_revision' ? 'Revision' : 'Signoff'}: {formatDate(task.final_start_date)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                     {/* Show dash if no final dates */}
-                    {!task.final_revision_start_date && !task.final_revision_end_date && (
+                    {!task.final_revision_entered_date && !task.final_signoff_entered_date && !task.final_start_date && !task.final_end_date && (
                       <span className="text-gray-400">—</span>
                     )}
-                  </div>
                 </div>
                 
                 {/* Signoff Dates Column */}
-                <div className="w-32 ml-4 text-xs text-gray-600 dark:text-gray-400">
-                  <div className="space-y-1">
+                <div className="ml-4 text-xs text-gray-600 dark:text-gray-400 align-top" style={{width: '154px', verticalAlign: 'top'}}>
                     {/* Final Signoff Sent */}
                     {(task.final_signoff_sent_start_date || task.final_signoff_sent_end_date) && (
-                      <div className="text-xs text-blue-600 dark:text-blue-400">
+                      <div className={`text-xs ${getPhaseColor('final_signoff_sent')}`}>
                         <div className="flex items-center space-x-1">
                           <Calendar className="h-3 w-3" />
                           <span>Sent: {task.final_signoff_sent_start_date ? formatDate(task.final_signoff_sent_start_date) : '—'}</span>
@@ -3501,7 +3542,7 @@ function CoursePhases({ courseId }) {
                     )}
                     {/* Final Signoff Received */}
                     {task.final_signoff_received_start_date && (
-                      <div className="text-xs text-green-600 dark:text-green-400">
+                      <div className={`text-xs ${getPhaseColor('final_signoff_received')}`}>
                         <div className="flex items-center space-x-1">
                           <CheckCircle className="h-3 w-3" />
                           <span>Received: {formatDate(task.final_signoff_received_start_date)}</span>
@@ -3512,7 +3553,6 @@ function CoursePhases({ courseId }) {
                     {!task.final_signoff_sent_start_date && !task.final_signoff_sent_end_date && !task.final_signoff_received_start_date && (
                       <span className="text-gray-400">—</span>
                     )}
-                  </div>
                 </div>
               </div>
             </div>
